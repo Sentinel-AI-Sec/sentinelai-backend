@@ -1,0 +1,7 @@
+﻿services:
+  sentinelai.api:
+    image: sentinelai.api
+    build:
+      context: .
+      dockerfile: src/SentinelAI.Api/Dockerfile
+

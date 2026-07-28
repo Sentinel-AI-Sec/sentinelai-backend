@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "8P8is1fDUF0=",
+  "dgSpecHash": "TBoBJtnImhQ=",
   "success": true,
-  "projectFilePath": "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Domain\\SentinelAI.Domain.csproj",
+  "projectFilePath": "/home/seif/sentinelai-backend/src/SentinelAI.Domain/SentinelAI.Domain.csproj",
   "expectedPackageFiles": [],
   "logs": []
 }

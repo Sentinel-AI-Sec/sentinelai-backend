@@ -1,8 +1,12 @@
 {
   "version": 2,
-  "dgSpecHash": "NUYJBiXGPxA=",
+  "dgSpecHash": "8ygdfpOyKog=",
   "success": true,
-  "projectFilePath": "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Application\\SentinelAI.Application.csproj",
-  "expectedPackageFiles": [],
+  "projectFilePath": "/home/seif/sentinelai-backend/src/SentinelAI.Application/SentinelAI.Application.csproj",
+  "expectedPackageFiles": [
+    "/home/seif/.nuget/packages/fluentvalidation/12.1.1/fluentvalidation.12.1.1.nupkg.sha512",
+    "/home/seif/.nuget/packages/fluentvalidation.dependencyinjectionextensions/12.1.1/fluentvalidation.dependencyinjectionextensions.12.1.1.nupkg.sha512",
+    "/home/seif/.nuget/packages/microsoft.extensions.dependencyinjection.abstractions/2.1.0/microsoft.extensions.dependencyinjection.abstractions.2.1.0.nupkg.sha512"
+  ],
   "logs": []
 }

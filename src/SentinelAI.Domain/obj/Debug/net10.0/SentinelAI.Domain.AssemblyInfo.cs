@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SentinelAI.Domain")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+1ad93f06320c2bdbf06b3a3cbfe6a86cdf18b237")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+056639f62f7fcf5df2a7c61ea9c9dd173d06a893")]
 [assembly: System.Reflection.AssemblyProductAttribute("SentinelAI.Domain")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SentinelAI.Domain")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

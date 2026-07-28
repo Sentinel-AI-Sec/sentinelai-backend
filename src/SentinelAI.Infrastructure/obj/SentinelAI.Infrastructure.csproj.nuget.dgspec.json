@@ -1,41 +1,33 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Infrastructure\\SentinelAI.Infrastructure.csproj": {}
+    "/home/seif/sentinelai-backend/src/SentinelAI.Infrastructure/SentinelAI.Infrastructure.csproj": {}
   },
   "projects": {
-    "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Application\\SentinelAI.Application.csproj": {
+    "/home/seif/sentinelai-backend/src/SentinelAI.Application/SentinelAI.Application.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Application\\SentinelAI.Application.csproj",
+        "projectUniqueName": "/home/seif/sentinelai-backend/src/SentinelAI.Application/SentinelAI.Application.csproj",
         "projectName": "SentinelAI.Application",
-        "projectPath": "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Application\\SentinelAI.Application.csproj",
-        "packagesPath": "C:\\Users\\AdminOS\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Application\\obj\\",
+        "projectPath": "/home/seif/sentinelai-backend/src/SentinelAI.Application/SentinelAI.Application.csproj",
+        "packagesPath": "/home/seif/.nuget/packages/",
+        "outputPath": "/home/seif/sentinelai-backend/src/SentinelAI.Application/obj/",
         "projectStyle": "PackageReference",
-        "fallbackFolders": [
-          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
-        ],
         "configFilePaths": [
-          "C:\\Users\\AdminOS\\AppData\\Roaming\\NuGet\\NuGet.Config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+          "/home/seif/.nuget/NuGet/NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net10.0"
         ],
         "sources": {
-          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
-          "C:\\Program Files\\dotnet\\library-packs": {},
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
           "net10.0": {
-            "framework": "net10.0",
             "targetAlias": "net10.0",
             "projectReferences": {
-              "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Domain\\SentinelAI.Domain.csproj": {
-                "projectPath": "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Domain\\SentinelAI.Domain.csproj"
+              "/home/seif/sentinelai-backend/src/SentinelAI.Domain/SentinelAI.Domain.csproj": {
+                "projectPath": "/home/seif/sentinelai-backend/src/SentinelAI.Domain/SentinelAI.Domain.csproj"
               }
             }
           }
@@ -50,12 +42,17 @@
           "auditLevel": "low",
           "auditMode": "all"
         },
-        "SdkAnalysisLevel": "10.0.300"
+        "SdkAnalysisLevel": "10.0.200"
       },
       "frameworks": {
         "net10.0": {
-          "framework": "net10.0",
           "targetAlias": "net10.0",
+          "dependencies": {
+            "FluentValidation.DependencyInjectionExtensions": {
+              "target": "Package",
+              "version": "[12.1.1, )"
+            }
+          },
           "imports": [
             "net461",
             "net462",
@@ -72,7 +69,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.301/PortableRuntimeIdentifierGraph.json",
+          "runtimeIdentifierGraphPath": "/home/seif/.dotnet/sdk/10.0.203/PortableRuntimeIdentifierGraph.json",
           "packagesToPrune": {
             "Microsoft.CSharp": "(,4.7.32767]",
             "Microsoft.VisualBasic": "(,10.4.32767]",
@@ -350,34 +347,26 @@
         }
       }
     },
-    "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Domain\\SentinelAI.Domain.csproj": {
+    "/home/seif/sentinelai-backend/src/SentinelAI.Domain/SentinelAI.Domain.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Domain\\SentinelAI.Domain.csproj",
+        "projectUniqueName": "/home/seif/sentinelai-backend/src/SentinelAI.Domain/SentinelAI.Domain.csproj",
         "projectName": "SentinelAI.Domain",
-        "projectPath": "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Domain\\SentinelAI.Domain.csproj",
-        "packagesPath": "C:\\Users\\AdminOS\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Domain\\obj\\",
+        "projectPath": "/home/seif/sentinelai-backend/src/SentinelAI.Domain/SentinelAI.Domain.csproj",
+        "packagesPath": "/home/seif/.nuget/packages/",
+        "outputPath": "/home/seif/sentinelai-backend/src/SentinelAI.Domain/obj/",
         "projectStyle": "PackageReference",
-        "fallbackFolders": [
-          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
-        ],
         "configFilePaths": [
-          "C:\\Users\\AdminOS\\AppData\\Roaming\\NuGet\\NuGet.Config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+          "/home/seif/.nuget/NuGet/NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net10.0"
         ],
         "sources": {
-          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
-          "C:\\Program Files\\dotnet\\library-packs": {},
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
           "net10.0": {
-            "framework": "net10.0",
             "targetAlias": "net10.0",
             "projectReferences": {}
           }
@@ -392,11 +381,10 @@
           "auditLevel": "low",
           "auditMode": "all"
         },
-        "SdkAnalysisLevel": "10.0.300"
+        "SdkAnalysisLevel": "10.0.200"
       },
       "frameworks": {
         "net10.0": {
-          "framework": "net10.0",
           "targetAlias": "net10.0",
           "imports": [
             "net461",
@@ -414,7 +402,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.301/PortableRuntimeIdentifierGraph.json",
+          "runtimeIdentifierGraphPath": "/home/seif/.dotnet/sdk/10.0.203/PortableRuntimeIdentifierGraph.json",
           "packagesToPrune": {
             "Microsoft.CSharp": "(,4.7.32767]",
             "Microsoft.VisualBasic": "(,10.4.32767]",
@@ -692,41 +680,33 @@
         }
       }
     },
-    "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Infrastructure\\SentinelAI.Infrastructure.csproj": {
+    "/home/seif/sentinelai-backend/src/SentinelAI.Infrastructure/SentinelAI.Infrastructure.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Infrastructure\\SentinelAI.Infrastructure.csproj",
+        "projectUniqueName": "/home/seif/sentinelai-backend/src/SentinelAI.Infrastructure/SentinelAI.Infrastructure.csproj",
         "projectName": "SentinelAI.Infrastructure",
-        "projectPath": "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Infrastructure\\SentinelAI.Infrastructure.csproj",
-        "packagesPath": "C:\\Users\\AdminOS\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Infrastructure\\obj\\",
+        "projectPath": "/home/seif/sentinelai-backend/src/SentinelAI.Infrastructure/SentinelAI.Infrastructure.csproj",
+        "packagesPath": "/home/seif/.nuget/packages/",
+        "outputPath": "/home/seif/sentinelai-backend/src/SentinelAI.Infrastructure/obj/",
         "projectStyle": "PackageReference",
-        "fallbackFolders": [
-          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
-        ],
         "configFilePaths": [
-          "C:\\Users\\AdminOS\\AppData\\Roaming\\NuGet\\NuGet.Config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+          "/home/seif/.nuget/NuGet/NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net10.0"
         ],
         "sources": {
-          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
-          "C:\\Program Files\\dotnet\\library-packs": {},
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
           "net10.0": {
-            "framework": "net10.0",
             "targetAlias": "net10.0",
             "projectReferences": {
-              "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Application\\SentinelAI.Application.csproj": {
-                "projectPath": "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Application\\SentinelAI.Application.csproj"
+              "/home/seif/sentinelai-backend/src/SentinelAI.Application/SentinelAI.Application.csproj": {
+                "projectPath": "/home/seif/sentinelai-backend/src/SentinelAI.Application/SentinelAI.Application.csproj"
               },
-              "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Domain\\SentinelAI.Domain.csproj": {
-                "projectPath": "C:\\Users\\AdminOS\\OneDrive\\Desktop\\sentinelai-backend\\src\\SentinelAI.Domain\\SentinelAI.Domain.csproj"
+              "/home/seif/sentinelai-backend/src/SentinelAI.Domain/SentinelAI.Domain.csproj": {
+                "projectPath": "/home/seif/sentinelai-backend/src/SentinelAI.Domain/SentinelAI.Domain.csproj"
               }
             }
           }
@@ -741,12 +721,17 @@
           "auditLevel": "low",
           "auditMode": "all"
         },
-        "SdkAnalysisLevel": "10.0.300"
+        "SdkAnalysisLevel": "10.0.200"
       },
       "frameworks": {
         "net10.0": {
-          "framework": "net10.0",
           "targetAlias": "net10.0",
+          "dependencies": {
+            "Microsoft.EntityFrameworkCore.SqlServer": {
+              "target": "Package",
+              "version": "[10.0.10, )"
+            }
+          },
           "imports": [
             "net461",
             "net462",
@@ -763,7 +748,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.301/PortableRuntimeIdentifierGraph.json",
+          "runtimeIdentifierGraphPath": "/home/seif/.dotnet/sdk/10.0.203/PortableRuntimeIdentifierGraph.json",
           "packagesToPrune": {
             "Microsoft.CSharp": "(,4.7.32767]",
             "Microsoft.VisualBasic": "(,10.4.32767]",
