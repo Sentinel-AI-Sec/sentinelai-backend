@@ -1,0 +1,19 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/SentinelAI.Agents.Demo/SentinelAI.Agents.Demo.csproj" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path="compose.yaml" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/SentinelAI.Api/SentinelAI.Api.csproj" />
+    <Project Path="src/SentinelAI.Application/SentinelAI.Application.csproj" />
+    <Project Path="src/SentinelAI.Domain/SentinelAI.Domain.csproj" />
+    <Project Path="src/SentinelAI.Infrastructure/SentinelAI.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SentinelAI.Application.Tests/SentinelAI.Application.Tests.csproj" />
+    <Project Path="tests/SentinelAI.Domain.Tests/SentinelAI.Domain.Tests.csproj" />
+    <Project Path="tests/SentinelAI.Integration.Tests/SentinelAI.Integration.Tests.csproj" />
+  </Folder>
+</Solution>

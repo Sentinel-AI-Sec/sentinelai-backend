@@ -1,0 +1,39 @@
+{
+  "//": "TEMPLATE — this file IS committed. Never put a real key here. Copy it to dev.json (git-ignored) and fill that in instead.",
+
+  "SentinelAI": {
+    "Models": {
+      "Provider": "Nim",
+
+      "//HighTierModel": "Shared defaults. A per-agent Model below overrides these.",
+      "HighTierModel": "meta/llama-3.3-70b-instruct",
+      "CheapTierModel": "meta/llama-3.1-8b-instruct",
+
+      "//ApiKey": "Optional shared fallback for any agent without its own key below.",
+      "ApiKey": "",
+
+      "//Agents": "One key per agent, so rate limits and spend are isolated per role.",
+      "Agents": {
+        "Orchestrator": {
+          "//": "Required. The Orchestrator analyses the resource graph and briefs Red, so it does make a model call. Routed to the cheap tier.",
+          "ApiKey": ""
+        },
+        "Red": {
+          "ApiKey": ""
+        },
+        "Blue": {
+          "ApiKey": ""
+        },
+        "Reporter": {
+          "ApiKey": "",
+          "//Model": "Per-agent override — e.g. run adjudication on a different model.",
+          "Model": ""
+        }
+      }
+    },
+
+    "Debate": {
+      "MaxRounds": 3
+    }
+  }
+}
