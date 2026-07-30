@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
 	  <NuGetAudit>false</NuGetAudit>
+    <UserSecretsId>91f2bca1-f20f-4adb-8d52-b42f4448ac7c</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
