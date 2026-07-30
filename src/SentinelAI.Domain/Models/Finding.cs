@@ -1,11 +1,13 @@
-﻿namespace SentinelAI.Domain.Models
+﻿using SentinelAI.Domain.Enums;
+
+namespace SentinelAI.Domain.Models
 {
     public class Finding
     {
         public Guid Id { get; set; }
         public Guid ScanJobId { get; set; }
         public string SourceTool { get; set; } = string.Empty;
-        public string Layer { get; set; } = string.Empty;
+        public Layer Layer { get; set; }
         public int Severity { get; set; }
         public string? CweId { get; set; }
         public string? CveId { get; set; }
