@@ -35,6 +35,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SentinelAI.Api\SentinelAI.Api.csproj" />
+    <!-- Referenced explicitly rather than relied on transitively through the Api: these
+         tests exercise the agent stack directly, so the dependency is real, not incidental. -->
+    <ProjectReference Include="..\..\src\SentinelAI.Application\SentinelAI.Application.csproj" />
+    <ProjectReference Include="..\..\src\SentinelAI.Infrastructure\SentinelAI.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

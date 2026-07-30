@@ -1,6 +1,19 @@
-@SentinelAI.Api_HostAddress = http://localhost:5226
+@SentinelAI.Api_HostAddress = https://localhost:7071
 
 GET {{SentinelAI.Api_HostAddress}}/weatherforecast/
 Accept: application/json
+
+###
+
+POST {{SentinelAI.Api_HostAddress}}/v1/debates/demo
+
+###
+
+POST {{SentinelAI.Api_HostAddress}}/v1/debates
+Content-Type: application/json
+
+{
+  {"scanJobId": "test-1", "resourceGraph": "RESOURCE GRAPH\nFindings:\n  F1: ..."}
+}
 
 ###

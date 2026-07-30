@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using SentinelAI.Infrastructure.Agents;
 using SentinelAI.Infrastructure.Data;
 
 namespace SentinelAI.Infrastructure;
@@ -11,6 +12,8 @@ public static class DependencyInjection
     {
         services.AddDbContext<SentinelDbContext>(options =>
             options.UseSqlServer(configuration.GetConnectionString("DefaultConnection")));
+
+        services.AddDebateServices(configuration);
 
         return services;
     }
