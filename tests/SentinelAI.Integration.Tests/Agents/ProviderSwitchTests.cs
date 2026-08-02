@@ -48,6 +48,50 @@ public class ProviderSwitchTests
         Assert.Contains("API key", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    // A failure must not be cached by the client cache: a missing credential has to fail on
+    // every attempt, not once.
+    [Fact]
+    public void A_missing_key_keeps_failing_rather_than_being_cached()
+    {
+        var factory = new ChatClientFactory(new ModelProviderOptions { Provider = ModelProvider.Nim });
+
+        Assert.Throws<InvalidOperationException>(() => factory.Create(AgentRole.Red, ModelTier.High));
+        Assert.Throws<InvalidOperationException>(() => factory.Create(AgentRole.Red, ModelTier.High));
+    }
+
+    // A workflow is built per scan, so an uncached factory rebuilt four connections per
+    // request and left them undisposed.
+    [Fact]
+    public void Live_clients_are_reused_across_calls()
+    {
+        var options = new ModelProviderOptions { Provider = ModelProvider.Nim, ApiKey = "test-key-not-used" };
+        var factory = new ChatClientFactory(options);
+
+        Assert.Same(
+            factory.Create(AgentRole.Red, ModelTier.High),
+            factory.Create(AgentRole.Red, ModelTier.High));
+
+        // Different role or tier is a different credential and model, so a different client.
+        Assert.NotSame(
+            factory.Create(AgentRole.Red, ModelTier.High),
+            factory.Create(AgentRole.Blue, ModelTier.High));
+        Assert.NotSame(
+            factory.Create(AgentRole.Red, ModelTier.High),
+            factory.Create(AgentRole.Red, ModelTier.Cheap));
+    }
+
+    // The scripted client records call counts the checkpoint-resume tests assert on, so
+    // sharing one across runs would make those cumulative.
+    [Fact]
+    public void Scripted_clients_are_never_shared()
+    {
+        var factory = new ChatClientFactory(new ModelProviderOptions());
+
+        Assert.NotSame(
+            factory.Create(AgentRole.Red, ModelTier.High),
+            factory.Create(AgentRole.Red, ModelTier.High));
+    }
+
     [Fact]
     public void Azure_requires_an_explicit_endpoint()
     {

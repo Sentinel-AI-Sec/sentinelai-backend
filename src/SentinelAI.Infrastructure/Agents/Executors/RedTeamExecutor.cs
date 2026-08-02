@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI;
+using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
 
 namespace SentinelAI.Infrastructure.Agents.Executors;
@@ -43,6 +44,6 @@ public sealed class RedTeamExecutor(AIAgent agent) : DebateExecutor(ExecutorId, 
             Round = incoming.Round + 1,
             Content = content,
             // Red asserts; it does not decide confidence. Blue downgrades on inspection.
-            Confidence = JoinConfidence.Certain
+            Confidence = Confidence.Certain
         };
 }

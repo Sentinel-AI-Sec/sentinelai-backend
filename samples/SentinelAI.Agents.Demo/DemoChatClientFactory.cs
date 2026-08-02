@@ -61,7 +61,7 @@ internal sealed class DemoChatClientFactory(ModelProviderOptions options, Scenar
 
             // Contains UNRESOLVED *and* the convergence marker on purpose. Blue cannot
             // confirm a load-bearing join, but it does not break the chain either - so the
-            // chain survives to the Reporter carrying JoinConfidence.Unresolved. That is
+            // chain survives to the Reporter carrying Confidence.Unresolved. That is
             // AID-01 3.3's "does not kill the chain silently".
             Scenario.Unresolved =>
                 "VALIDATE: hop 1 confirmed against packages.lock.json. hop 2 confirmed against "

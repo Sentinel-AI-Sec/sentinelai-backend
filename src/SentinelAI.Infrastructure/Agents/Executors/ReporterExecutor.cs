@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
+using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
 
 namespace SentinelAI.Infrastructure.Agents.Executors;
@@ -84,8 +85,8 @@ public sealed class ReporterExecutor(AIAgent agent, int maxRounds)
         TerminatedByTurnCap = cappedOut,
         Converged = closing.Converged,
         VerdictReadable = closing.VerdictReadable,
-        WeakestJoin = state.Transcript.Count == 0
-            ? JoinConfidence.Certain
-            : state.Transcript.Min(t => t.Confidence)
+        // The named rule, not Min(), so the enum's declaration order stops being load-bearing
+        // for anyone reading this — the shared enum now has a second owner (the graph).
+        WeakestJoin = state.Transcript.Weakest(t => t.Confidence)
     };
 }

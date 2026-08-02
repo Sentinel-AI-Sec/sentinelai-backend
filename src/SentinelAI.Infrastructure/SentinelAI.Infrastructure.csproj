@@ -1,6 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <!-- Needed for IHttpContextAccessor (HttpCallerContext reads bearer-token claims). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\SentinelAI.Application\SentinelAI.Application.csproj" />
     <ProjectReference Include="..\SentinelAI.Domain\SentinelAI.Domain.csproj" />
   </ItemGroup>
@@ -19,7 +24,12 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.8.3" />
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
+    <!--
+      Supplies services.Configure<T>(IConfigurationSection), which binds the model and
+      debate options. It was arriving transitively through Swashbuckle.AspNetCore; that
+      package was removed as a layer violation, so the real dependency is now declared.
+    -->
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.10" />
   </ItemGroup>
 
   <PropertyGroup>
