@@ -1,6 +1,34 @@
 # Configuration
 
-Providers, credentials, and the knobs that change how the debate behaves.
+Providers, credentials, the database, and the knobs that change how the debate behaves.
+
+---
+
+## 0. Database
+
+`ConnectionStrings:DefaultConnection` is read by `AddInfrastructureServices` and is required
+for migrations and anything touching persistence. **The debate endpoints do not use it** —
+`POST /v1/debates` runs with no database at all, which is why a missing connection string
+does not stop the API from starting.
+
+It is deliberately **not** set in the committed `appsettings.json`: an empty string makes
+`dotnet ef` fail, and a real one does not belong in a tracked file. Set it in one of:
+
+| Location | Use |
+|---|---|
+| `appsettings.Development.json` | Local development. **Git-ignored.** |
+| `ConnectionStrings__DefaultConnection` env var | CI and deployment. |
+| `dotnet user-secrets` | Local development, outside the working tree. |
+
+`appsettings.Development.example.json` carries a zero-setup LocalDB default — copy it to
+`appsettings.Development.json` and adjust.
+
+```bash
+dotnet ef database update --project src/SentinelAI.Infrastructure --startup-project src/SentinelAI.Api
+```
+
+> A connection string with a password in a tracked file fails the CI `secrets` job. Use
+> integrated auth locally and an environment variable everywhere else.
 
 ---
 
@@ -63,15 +91,19 @@ tier default". This is how you put adjudication on a different model from assert
 
 | Location | Use |
 |---|---|
-| `samples/SentinelAI.Agents.Demo/dev.json` | Local development. **Git-ignored.** |
+| `src/SentinelAI.Api/appsettings.Development.json` | The API. **Git-ignored.** |
+| `samples/SentinelAI.Agents.Demo/dev.json` | The demo runner. **Git-ignored.** |
 | `dotnet user-secrets` | Local development, outside the working tree. |
 | Environment variables | CI and deployment. |
 
-`dev.example.json` is the committed template — copy it to `dev.json` and fill it in.
+Each has a committed `.example` template beside it — copy and fill in.
 
-> **Never commit `dev.json`.** `.gitignore` covers it and the CI `secrets` job fails the
-> build on a tracked secrets file or an `nvapi-` / `sk-ant-` / `sk-` literal anywhere in the
-> tree. A leaked key is not recoverable by reverting the commit — rotate it.
+The committed `appsettings.json` ships `Provider: "Scripted"` so a fresh clone runs with no
+credentials at all. `appsettings.Development.json` overrides it to a live provider.
+
+> **Never commit a filled-in secrets file.** `.gitignore` covers them and the CI `secrets`
+> job fails the build on a tracked secrets file or an `nvapi-` / `sk-ant-` / `sk-` literal
+> anywhere in the tree. A leaked key is not recoverable by reverting the commit — rotate it.
 
 ---
 

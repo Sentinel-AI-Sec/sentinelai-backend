@@ -34,9 +34,14 @@ public sealed class OrchestratorExecutor : Executor<ScanBrief, DebateTurn>
         => _agent = agent ?? throw new ArgumentNullException(nameof(agent));
 
     /// <summary>
-    /// Creates a pass-through orchestrator with no model call. Used by the Scripted
-    /// provider and by tests — the raw context is forwarded as the seed turn.
+    /// Creates a pass-through orchestrator with no model call — the raw context is
+    /// forwarded as the seed turn.
     /// </summary>
+    /// <remarks>
+    /// Tests only. Every provider, Scripted included, goes through
+    /// <c>DebateWorkflow.CreateAgent</c> and gets the model-backed constructor above; the
+    /// Scripted provider swaps the <c>IChatClient</c>, not the executor.
+    /// </remarks>
     public OrchestratorExecutor() : base(ExecutorId) { }
 
     public override async ValueTask<DebateTurn> HandleAsync(

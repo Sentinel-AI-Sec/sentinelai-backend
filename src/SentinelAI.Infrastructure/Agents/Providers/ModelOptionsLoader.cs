@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Configuration;
 using SentinelAI.Domain.Models;
 
@@ -44,6 +45,18 @@ public static class ModelOptionsLoader
 
         if (Enum.TryParse<ModelProvider>(section["Provider"], ignoreCase: true, out var provider))
             options.Provider = provider;
+
+        // Read explicitly like everything else on this type. Omitting them meant the two
+        // settings that bound how long a stalled provider can hang the debate — and how many
+        // times a failed call is repeated — silently kept their defaults no matter what
+        // configuration said.
+        if (TimeSpan.TryParse(section["RequestTimeout"], CultureInfo.InvariantCulture, out var timeout)
+            && timeout > TimeSpan.Zero)
+            options.RequestTimeout = timeout;
+
+        if (int.TryParse(section["MaxRetries"], CultureInfo.InvariantCulture, out var retries)
+            && retries >= 0)
+            options.MaxRetries = retries;
 
         // Every role is read by name, so an unrecognised key in the file is simply ignored
         // rather than quietly becoming an agent nobody configured.

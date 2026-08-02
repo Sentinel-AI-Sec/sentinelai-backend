@@ -1,0 +1,142 @@
+name: CI
+
+# The whole test suite runs against the Scripted provider, so CI needs no API key, no
+# network access to a model, and spends no tokens. Any job here that suddenly needs a
+# secret means something has been wired to a live provider by mistake.
+#
+# No database either: the migrations job compares the EF model to the snapshot on disk and
+# never contacts a server.
+
+on:
+  push:
+    branches: [main, master, dev, develop]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  # Belt and braces: even if a committed appsettings names a live provider, CI stays offline.
+  SentinelAI__Models__Provider: Scripted
+
+jobs:
+  build:
+    name: Build & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore SentinelAI.slnx
+
+      - name: Build
+        run: dotnet build SentinelAI.slnx --no-restore --configuration Release
+
+      - name: Test
+        run: >
+          dotnet test SentinelAI.slnx
+          --no-build
+          --configuration Release
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/*.trx
+          if-no-files-found: ignore
+
+      - name: Smoke-run the offline demo
+        # Proves the sample still runs end to end. Scripted provider, so it is deterministic
+        # and free — a broken demo should fail CI, not the sprint review.
+        run: >
+          dotnet run --project samples/SentinelAI.Agents.Demo
+          --configuration Release --no-build -- debate
+
+  migrations:
+    name: EF model matches migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install EF tools
+        run: dotnet tool install --global dotnet-ef
+
+      - name: Fail if the model drifted from the last migration
+        # Catches an entity change merged without its migration, which otherwise surfaces as
+        # a runtime column-not-found in whoever's environment updates first.
+        run: >
+          dotnet ef migrations has-pending-model-changes
+          --project src/SentinelAI.Infrastructure
+          --startup-project src/SentinelAI.Api
+
+  secrets:
+    name: Secret hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail if a local secrets file was committed
+        # appsettings.Development.json holds one live API key per agent. .gitignore covers
+        # it, but a `git add -f` or a rename slips past that, and a leaked key is not
+        # recoverable by reverting the commit.
+        run: |
+          matches=$(git ls-files \
+            | grep -E '(^|/)(dev\.json|dev\..*\.json|secrets\.json|appsettings\.(Development|Local)\.json)$' \
+            | grep -v 'example' || true)
+          if [ -n "$matches" ]; then
+            echo "::error::Committed secrets file(s):"
+            echo "$matches"
+            exit 1
+          fi
+          echo "No secrets files tracked."
+
+      - name: Fail if an API key literal was committed
+        # Provider key prefixes: nvapi- (NVIDIA NIM), sk-ant- (Anthropic), sk- (OpenAI).
+        run: |
+          hits=$(git grep -nIE '(nvapi-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,})' \
+                 -- . ':(exclude).github/workflows/*' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Possible API key committed:"
+            echo "$hits"
+            exit 1
+          fi
+          echo "No API key literals found."
+
+      - name: Fail if a connection-string password was committed
+        run: |
+          hits=$(git grep -nIE '(Password|pwd)=[^;"[:space:]]+' \
+                 -- '*.json' '*.cs' '*.yaml' '*.yml' \
+                 ':(exclude).github/workflows/*' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Possible connection-string password committed:"
+            echo "$hits"
+            exit 1
+          fi
+          echo "No connection-string passwords found."

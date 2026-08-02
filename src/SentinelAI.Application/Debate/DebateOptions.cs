@@ -48,11 +48,11 @@ public sealed class DebateOptions
     /// </summary>
     public float Temperature { get; set; } = 0.2f;
 
-    /// <summary>
-    /// Per-call ceiling. Without it a stalled provider hangs the whole debate with no
-    /// output and no error, which is indistinguishable from the run being slow.
-    /// </summary>
-    public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(120);
+    // There is deliberately no RequestTimeout here. The per-call ceiling is applied to the
+    // HTTP pipeline when the client is built, which happens before these options are in
+    // scope, so it lives on ModelProviderOptions (SentinelAI:Models:RequestTimeout). A copy
+    // on this type was bound from SentinelAI:Debate and read by nothing — setting it looked
+    // like it worked and changed no behaviour.
 
     public ModelTier TierFor(AgentRole role) =>
         Tiers.TryGetValue(role, out var tier) ? tier : ModelTier.High;

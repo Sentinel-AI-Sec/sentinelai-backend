@@ -1,3 +1,5 @@
+using SentinelAI.Domain.Enums;
+
 namespace SentinelAI.Domain.Models;
 
 /// <summary>
@@ -17,9 +19,14 @@ public sealed record DebateTurn
 
     /// <summary>
     /// Weakest join confidence this turn depends on. Reporter surfaces anything
-    /// <see cref="JoinConfidence.Unresolved"/> as "potential chain, unverified join".
+    /// <see cref="Enums.Confidence.Unresolved"/> as "potential chain, unverified join".
     /// </summary>
-    public JoinConfidence Confidence { get; init; } = JoinConfidence.Certain;
+    /// <remarks>
+    /// Deliberately the same <see cref="Enums.Confidence"/> a <see cref="GraphEdge"/> carries.
+    /// The debate's verdict has to be writable back onto the graph, and two enums for one
+    /// concept is how that quietly stops being true.
+    /// </remarks>
+    public Confidence Confidence { get; init; } = Enums.Confidence.Certain;
 
     /// <summary>
     /// Set by Blue when it cannot break any link — the convergence signal the

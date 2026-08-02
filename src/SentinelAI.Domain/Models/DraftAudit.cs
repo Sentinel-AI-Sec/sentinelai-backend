@@ -1,3 +1,5 @@
+using SentinelAI.Domain.Enums;
+
 namespace SentinelAI.Domain.Models;
 
 /// <summary>
@@ -25,8 +27,8 @@ public sealed record DraftAudit
         : Converged ? DebateOutcome.Converged
         : DebateOutcome.ChainBroken;
 
-    /// <summary>Weakest confidence across the whole transcript.</summary>
-    public JoinConfidence WeakestJoin { get; init; } = JoinConfidence.Certain;
+    /// <summary>Weakest confidence across the whole transcript (AID-01 section 3.3).</summary>
+    public Confidence WeakestJoin { get; init; } = Confidence.Certain;
 
     /// <summary>Non-negotiable framing per AID-01 section 7.</summary>
     public string Disclaimer =>

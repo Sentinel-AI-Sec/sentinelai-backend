@@ -82,10 +82,15 @@ public sealed class ModelProviderOptions
         new Dictionary<AgentRole, AgentModelOptions>();
 
     /// <summary>
-    /// Per-call network ceiling, applied to the underlying HTTP pipeline. Mirrors
-    /// <c>DebateOptions.RequestTimeout</c>; kept here because the client is built before
-    /// the debate options are in scope.
+    /// Per-call network ceiling, applied to the underlying HTTP pipeline. Without it a
+    /// stalled provider hangs the whole debate with no output and no error, which is
+    /// indistinguishable from the run being slow.
     /// </summary>
+    /// <remarks>
+    /// This is the only request timeout. It lives here rather than on <c>DebateOptions</c>
+    /// because the client is built before the debate options are in scope — a second copy
+    /// over there was bound from configuration and read by nothing.
+    /// </remarks>
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(120);
 
     /// <summary>

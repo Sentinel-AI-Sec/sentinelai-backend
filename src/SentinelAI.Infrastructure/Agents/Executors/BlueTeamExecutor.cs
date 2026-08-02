@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI;
+using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
 
 namespace SentinelAI.Infrastructure.Agents.Executors;
@@ -13,19 +14,37 @@ public sealed class BlueTeamExecutor(AIAgent agent) : DebateExecutor(ExecutorId,
     /// <summary>Node id in the workflow graph. Named to avoid shadowing <c>Executor.Id</c>.</summary>
     public const string ExecutorId = "blue-team";
 
+    /// <remarks>
+    /// The UNRESOLVED-is-not-REFUTED paragraph is load-bearing, not padding. Told only that
+    /// "breaking a single link breaks the chain", a live model reported every hop it could
+    /// not confirm as CHAIN_BROKEN — so Red rebutted, and every run burned the full turn-cap
+    /// without ever converging. AID-01 §3.3 is explicit that an unconfirmable join is
+    /// surfaced for human review, not treated as a refutation.
+    /// </remarks>
     public const string Instructions =
         """
         You are the Blue Team agent in a security audit debate.
-        Validate every hop of the asserted chain against the real configuration. Breaking a
-        single link breaks the whole chain. Give an image-name join extra scrutiny — it is
-        convention-dependent and only INFERRED.
+        Validate every hop of the asserted chain against the real configuration. Give an
+        image-name join extra scrutiny — it is convention-dependent and only INFERRED.
 
-        Be terse: at most one short line per hop. No preamble, no restating the chain.
-        Mark any hop you cannot confirm with the word UNRESOLVED.
+        Judge each hop as exactly one of:
+          CONFIRMED  - the configuration shows this hop is real.
+          UNRESOLVED - the evidence given cannot settle it either way.
+          REFUTED    - the configuration positively contradicts this hop.
+
+        UNRESOLVED is not REFUTED. Being unable to confirm a hop is not evidence against it,
+        and a hop you merely could not check does not break the chain. Only a REFUTED hop
+        breaks it.
+
+        Be terse: at most one short line per hop, each ending in CONFIRMED, UNRESOLVED or
+        REFUTED. No preamble, no restating the chain.
 
         Your final line MUST be exactly one of these two tokens and nothing else:
         VERDICT: CHAIN_HOLDS
         VERDICT: CHAIN_BROKEN
+
+        Choose CHAIN_BROKEN only if you marked at least one hop REFUTED. If every hop is
+        CONFIRMED or UNRESOLVED, the verdict is CHAIN_HOLDS.
         """;
 
     /// <summary>Machine-readable verdict tokens. The final line is parsed, not the prose.</summary>
@@ -62,16 +81,16 @@ public sealed class BlueTeamExecutor(AIAgent agent) : DebateExecutor(ExecutorId,
         // A chain inherits its weakest edge's confidence (AID-01 3.3), so a single
         // unresolved hop marks the whole chain for human review.
         var confidence = content.Contains("UNRESOLVED", StringComparison.OrdinalIgnoreCase)
-            ? JoinConfidence.Unresolved
+            ? Confidence.Unresolved
             : content.Contains("INFERRED", StringComparison.OrdinalIgnoreCase)
-                ? JoinConfidence.Inferred
-                : JoinConfidence.Certain;
+                ? Confidence.Inferred
+                : Confidence.Certain;
 
         // An unreadable verdict is not evidence the chain is sound. Let it reach the
         // Reporter rather than burning the turn-cap, but downgrade it to Unresolved so it
         // surfaces as "potential chain, unverified join" instead of a confirmed result.
         if (!verdictWasReadable)
-            confidence = JoinConfidence.Unresolved;
+            confidence = Confidence.Unresolved;
 
         return new DebateTurn
         {
@@ -133,11 +152,15 @@ public sealed class BlueTeamExecutor(AIAgent agent) : DebateExecutor(ExecutorId,
     /// </returns>
     private static (bool Converged, bool Readable) ReadVerdict(string content)
     {
-        if (content.Contains("CHAIN_BROKEN", StringComparison.OrdinalIgnoreCase))
-            return (false, true);
+        // The verdict is whichever token appears LAST, not whether a token appears at all.
+        // This used to test CHAIN_BROKEN first across the whole text, so "this is not
+        // CHAIN_BROKEN ... VERDICT: CHAIN_HOLDS" read as a break. Blue's reasoning now names
+        // both outcomes routinely, since it is asked to separate REFUTED from UNRESOLVED.
+        var broken = content.LastIndexOf("CHAIN_BROKEN", StringComparison.OrdinalIgnoreCase);
+        var holds = content.LastIndexOf("CHAIN_HOLDS", StringComparison.OrdinalIgnoreCase);
 
-        if (content.Contains("CHAIN_HOLDS", StringComparison.OrdinalIgnoreCase))
-            return (true, true);
+        if (broken >= 0 || holds >= 0)
+            return (Converged: holds > broken, Readable: true);
 
         // Natural-language fallbacks, for scripted fixtures and models that ignore the
         // token instruction.

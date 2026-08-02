@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.Configuration;
 using SentinelAI.Application.Debate;
+using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
 using SentinelAI.Agents.Demo;
 using SentinelAI.Infrastructure.Agents.Executors;
@@ -179,7 +180,7 @@ static void PrintAudit(DebateResult result, Scenario scenario)
     Write(audit.TerminatedByTurnCap ? ConsoleColor.Yellow : ConsoleColor.Gray,
         $"  ended by turn-cap : {audit.TerminatedByTurnCap}");
 
-    Write(audit.WeakestJoin == JoinConfidence.Certain ? ConsoleColor.Gray : ConsoleColor.Yellow,
+    Write(audit.WeakestJoin == Confidence.Certain ? ConsoleColor.Gray : ConsoleColor.Yellow,
         $"  weakest join      : {audit.WeakestJoin}");
 
     ConsoleOut.Line($"  checkpoints       : {result.Checkpoints.Count}");
@@ -189,11 +190,11 @@ static void PrintAudit(DebateResult result, Scenario scenario)
     // while only an unresolved edge is surfaced as a potential-chain-unverified.
     switch (audit.WeakestJoin)
     {
-        case JoinConfidence.Unresolved:
+        case Confidence.Unresolved:
             Write(ConsoleColor.Yellow,
                 "  Potential chain, unverified join — surfaced for human confirmation, not a verdict.");
             break;
-        case JoinConfidence.Inferred:
+        case Confidence.Inferred:
             Write(ConsoleColor.Yellow,
                 "  Chain rests on an inferred join — usable, but flagged for extra scrutiny.");
             break;
@@ -204,7 +205,7 @@ static void PrintAudit(DebateResult result, Scenario scenario)
     if (scenario == Scenario.TurnCap && audit.TerminatedByTurnCap)
         Write(ConsoleColor.DarkGray, "  The Reporter still ran and still produced output. That is AC3.");
 
-    if (scenario == Scenario.Unresolved && audit.WeakestJoin == JoinConfidence.Unresolved)
+    if (scenario == Scenario.Unresolved && audit.WeakestJoin == Confidence.Unresolved)
         Write(ConsoleColor.DarkGray,
             "  The chain survived to the Reporter rather than being silently dropped.");
 

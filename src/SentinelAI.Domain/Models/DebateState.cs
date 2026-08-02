@@ -22,7 +22,17 @@ public sealed record DebateState
     /// </summary>
     public string ResourceGraph { get; init; } = string.Empty;
 
-    /// <summary>Current round. Incremented by Red at the head of each round.</summary>
+    /// <summary>
+    /// Highest round reached so far. Maintained by <see cref="Append"/> from the turns
+    /// themselves rather than by any one executor.
+    /// </summary>
+    /// <remarks>
+    /// It used to be documented as "incremented by Red" and then never incremented by
+    /// anything — the Orchestrator set it to 0 and it stayed there for the whole debate.
+    /// Because this record is what gets serialized into every checkpoint, a resumed run and
+    /// any future consumer of shared state read round 0 no matter how far the debate got.
+    /// Deriving it from the transcript means it cannot drift out of step again.
+    /// </remarks>
     public int Round { get; init; }
 
     /// <summary>True once Blue reports it cannot break the chain.</summary>
@@ -34,6 +44,14 @@ public sealed record DebateState
     [JsonIgnore]
     public int TurnCount => Transcript.Count;
 
-    public DebateState Append(DebateTurn turn) =>
-        this with { Transcript = [.. Transcript, turn] };
+    public DebateState Append(DebateTurn turn)
+    {
+        ArgumentNullException.ThrowIfNull(turn);
+
+        return this with
+        {
+            Transcript = [.. Transcript, turn],
+            Round = Math.Max(Round, turn.Round),
+        };
+    }
 }

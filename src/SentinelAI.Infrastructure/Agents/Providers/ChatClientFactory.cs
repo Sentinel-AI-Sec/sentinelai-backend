@@ -1,5 +1,6 @@
 using System.ClientModel;
 using System.ClientModel.Primitives;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.AI;
 using OpenAI;
 using SentinelAI.Application.Debate;
@@ -30,11 +31,29 @@ public sealed class ChatClientFactory(ModelProviderOptions options) : IChatClien
     private readonly ModelProviderOptions _options =
         options ?? throw new ArgumentNullException(nameof(options));
 
+    /// <summary>
+    /// Remote clients, reused across debates.
+    /// </summary>
+    /// <remarks>
+    /// A workflow is built per scan, so without this every request constructed four fresh
+    /// <see cref="OpenAIClient"/>s, threw away their connection pools, and left them
+    /// undisposed. Caching is safe because the client is stateless per call and the
+    /// credential is fixed per role: the key covers everything that varies.
+    /// </remarks>
+    private readonly ConcurrentDictionary<(AgentRole Role, ModelTier Tier), IChatClient> _remote = new();
+
     public IChatClient Create(AgentRole role, ModelTier tier) => _options.Provider switch
     {
+        // Deliberately not cached. ScriptedChatClient records call counts and every request
+        // it saw for test assertions, so a shared instance would make those cumulative
+        // across runs and quietly break the checkpoint-resume assertions.
         ModelProvider.Scripted => new ScriptedChatClient(role),
+
+        // A failure here propagates without being cached, so a missing credential still
+        // fails loud on every attempt rather than once.
         ModelProvider.Nim or ModelProvider.Anthropic or ModelProvider.AzureOpenAI =>
-            OpenAICompatible(role, tier),
+            _remote.GetOrAdd((role, tier), key => OpenAICompatible(key.Role, key.Tier)),
+
         _ => throw new NotSupportedException($"Unknown provider '{_options.Provider}'.")
     };
 

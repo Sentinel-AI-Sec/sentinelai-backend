@@ -1,3 +1,4 @@
+using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
 
 namespace SentinelAI.Domain.Tests;
@@ -8,16 +9,43 @@ namespace SentinelAI.Domain.Tests;
 /// </summary>
 public class DebateContractTests
 {
-    // AID-01 3.3: a chain inherits its weakest edge's confidence. The enum is ordered
-    // weakest-first precisely so Min() *is* that rule.
+    // AID-01 3.3: a chain inherits its weakest edge's confidence. Confidence is shared with
+    // the graph (GraphEdge.Confidence), so this pins the ordering against a well-meaning
+    // reorder in someone else's PR — reordering compiles fine and inverts the rule silently.
     [Fact]
-    public void Join_confidence_orders_weakest_first()
+    public void Confidence_orders_weakest_first()
     {
-        Assert.True(JoinConfidence.Unresolved < JoinConfidence.Inferred);
-        Assert.True(JoinConfidence.Inferred < JoinConfidence.Certain);
+        Assert.True(Confidence.Unresolved < Confidence.Inferred);
+        Assert.True(Confidence.Inferred < Confidence.Certain);
+    }
 
-        JoinConfidence[] chain = [JoinConfidence.Certain, JoinConfidence.Unresolved, JoinConfidence.Certain];
-        Assert.Equal(JoinConfidence.Unresolved, chain.Min());
+    [Fact]
+    public void Chain_inherits_its_weakest_join()
+    {
+        Confidence[] chain = [Confidence.Certain, Confidence.Unresolved, Confidence.Certain];
+        Assert.Equal(Confidence.Unresolved, chain.Weakest());
+
+        Confidence[] inferredChain = [Confidence.Certain, Confidence.Inferred];
+        Assert.Equal(Confidence.Inferred, inferredChain.Weakest());
+    }
+
+    // Nothing asserted means nothing to doubt. Guards the empty-transcript path the Reporter
+    // hits when the debate produced no turns.
+    [Fact]
+    public void Weakest_of_nothing_is_certain()
+    {
+        Assert.Equal(Confidence.Certain, Array.Empty<Confidence>().Weakest());
+        Assert.Equal(Confidence.Certain, Array.Empty<DebateTurn>().Weakest(t => t.Confidence));
+    }
+
+    // The debate's verdict has to be writable onto a graph edge without a translation table.
+    [Fact]
+    public void Debate_and_graph_speak_the_same_confidence_type()
+    {
+        var turn = Turn(AgentRole.Blue) with { Confidence = Confidence.Inferred };
+        var edge = new GraphEdge { Confidence = turn.Confidence };
+
+        Assert.Equal(turn.Confidence, edge.Confidence);
     }
 
     [Fact]
@@ -29,6 +57,22 @@ public class DebateContractTests
         Assert.Empty(original.Transcript);
         Assert.Single(appended.Transcript);
         Assert.Equal(1, appended.TurnCount);
+    }
+
+    // Round is serialized into every checkpoint. It was documented as "incremented by Red"
+    // and incremented by nothing, so a resumed run read round 0 however far the debate got.
+    [Fact]
+    public void State_tracks_the_highest_round_reached()
+    {
+        var state = new DebateState()
+            .Append(Turn(AgentRole.Red, round: 1))
+            .Append(Turn(AgentRole.Blue, round: 1))
+            .Append(Turn(AgentRole.Red, round: 2));
+
+        Assert.Equal(2, state.Round);
+
+        // The Reporter closes the round it was handed; that must not walk the count back.
+        Assert.Equal(2, state.Append(Turn(AgentRole.Reporter, round: 2)).Round);
     }
 
     // An unparseable verdict must never be reported as a convergence. Ordered
@@ -62,8 +106,8 @@ public class DebateContractTests
         Assert.Contains("not a verified verdict", audit.Disclaimer, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static DebateTurn Turn(AgentRole role) =>
-        new() { Role = role, Round = 1, Content = "turn" };
+    private static DebateTurn Turn(AgentRole role, int round = 1) =>
+        new() { Role = role, Round = round, Content = "turn" };
 
     private static DraftAudit Audit(bool converged, bool cappedOut, bool verdictReadable) => new()
     {

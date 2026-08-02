@@ -4,7 +4,7 @@
 
 **Scope:** observations from running the SEC-02 debate against NVIDIA NIM.
 **Models exercised:** `nvidia/nemotron-3-super-120b-a12b`, `nvidia/nemotron-3-ultra-550b-a55b`
-**Status:** three defects fixed, one open (§5).
+**Status:** five defects fixed, all confirmed against a live model.
 
 ---
 
@@ -108,9 +108,9 @@ spinner before writing.
 
 ---
 
-## 5. OPEN — Blue treats *unconfirmable* as *refuted*
+## 5. FIXED — Blue treated *unconfirmable* as *refuted*
 
-**This one violates AID-01 §3.3 and is not yet fixed.**
+**This one violated AID-01 §3.3.**
 
 **Symptom.** Three consecutive rounds, all identical:
 
@@ -137,10 +137,37 @@ only inference available to it.
 **Cost.** Every live run burns the full turn-cap. The 550B run spent six debate calls and
 134 seconds to produce an audit that two calls would have produced identically.
 
-**Fix (proposed).** State in Blue's instructions that only a hop *contradicted by the
-configuration* breaks the chain, and that unconfirmable hops are marked UNRESOLVED while the
-chain still holds. `Converged` then means "no link refuted"; the confidence tier already
-carries the unresolved-ness independently, so no new state is needed.
+**Fix.** Blue's instructions now ask for a three-way judgement per hop — CONFIRMED /
+UNRESOLVED / REFUTED — and state outright that UNRESOLVED is not REFUTED, that a hop it
+could not check does not break the chain, and that `CHAIN_BROKEN` requires at least one
+REFUTED hop. `Converged` now means "no link refuted"; the confidence tier already carried
+the unresolved-ness independently, so no new state was needed.
+
+A second defect surfaced while fixing this. `ReadVerdict` tested `content.Contains("CHAIN_BROKEN")`
+over the whole retained response, checking BROKEN before HOLDS — so now that Blue reasons
+about both outcomes out loud, a response reading *"this would be CHAIN_BROKEN only if … it is
+not. VERDICT: CHAIN_HOLDS"* was read as a break. The verdict is now taken from the last line
+carrying a token, not from the presence of a token anywhere.
+
+Both are covered offline:
+`An_unresolved_hop_alone_does_not_break_the_chain` and
+`The_closing_line_decides_the_verdict_not_the_prose_above_it` in `DebateAcceptanceTests`.
+
+**Confirmed live.** Same fixture, same unresolved join, through `POST /v1/debates` against NIM:
+
+| | Before | After |
+|---|---|---|
+| Outcome | `TurnCapped` | `Converged` |
+| Rounds / turns | 3 / 7 | **1 / 3** |
+| `weakestJoin` | `Unresolved` | `Unresolved` |
+
+Blue marked `N2->N3 ... UNRESOLVED` and still closed `VERDICT: CHAIN_HOLDS`, using the new
+per-hop CONFIRMED/UNRESOLVED vocabulary unprompted. The Reporter surfaced it as *"Potential
+chain ... UNVERIFIED JOIN"* and *"UNVERIFIED JOIN at N2->N3 blocks confirmation"*.
+
+A six-call debate became a three-call debate producing the same audit. `Converged` with
+`weakestJoin: Unresolved` is the correct pair, not a contradiction: convergence means nothing
+was *refuted*, and the uncertainty rides on the confidence tier and the disclaimer.
 
 ---
 
