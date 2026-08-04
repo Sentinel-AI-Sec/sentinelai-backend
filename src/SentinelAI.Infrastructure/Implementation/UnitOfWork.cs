@@ -6,11 +6,19 @@ using SentinelAI.Infrastructure.Implementation.Repositories;
 
 namespace SentinelAI.Infrastructure.Implementation;
 
-public class UnitOfWork(SentinelDbContext context, IScanJobRepository scanJobRepository) : IUnitOfWork
+public class UnitOfWork(
+    SentinelDbContext context,
+    IScanJobRepository scanJobRepository,
+    IUserRepository userRepository,
+    IRefreshTokenRepository refreshTokenRepository) : IUnitOfWork
 {
     private readonly Hashtable _repositories = new();
- 
+
     public IScanJobRepository ScanJobRepository { get; } = scanJobRepository;
+
+    public IUserRepository UserRepository { get; } = userRepository;
+
+    public IRefreshTokenRepository RefreshTokenRepository { get; } = refreshTokenRepository;
  
     public IGenericRepository<TEntity> Repository<TEntity>() where TEntity : class
     {

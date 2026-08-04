@@ -1,10 +1,12 @@
-﻿using SentinelAI.Domain.Enums;
+﻿using SentinelAI.Domain.Abstractions;
+using SentinelAI.Domain.Enums;
 
 namespace SentinelAI.Domain.Models
 {
-    public class ScanJob
+    public class ScanJob : ITenantOwned
     {
         public Guid Id { get; set; }
+        public Guid TenantId { get; set; }
         public Guid ProjectId { get; set; }
         public Guid? TriggeredBy { get; set; }
         public string PrRef { get; set; } = string.Empty;

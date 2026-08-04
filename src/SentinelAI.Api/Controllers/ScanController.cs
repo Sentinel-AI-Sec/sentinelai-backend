@@ -1,7 +1,10 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using SentinelAI.Application.Features.Scan.Commands.Purge;
 using SentinelAI.Application.Features.Scan.Commands.Submit;
+using SentinelAI.Application.Features.Scan.Queries.GetById;
+using SentinelAI.Domain.Models;
 
 namespace SentinelAI.Api.Controllers;
 
@@ -33,6 +36,25 @@ public class ScanController(ISender sender) : ControllerBase
 
         var response = await sender.Send(new SubmitScanCommand(request.Metadata, bundleStream), ct);
 
+        return StatusCode((int)response.StatusCode, response);
+    }
+
+    /// <summary>Polls a scan job — the poll URL <c>Submit</c>'s 202 response hands back.
+    /// Any authenticated caller may use this; tenant isolation is what actually scopes it.</summary>
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
+    {
+        var response = await sender.Send(new GetScanJobQuery(id), ct);
+        return StatusCode((int)response.StatusCode, response);
+    }
+
+    /// <summary>Administratively purges a job's stored bundle ahead of retention. Admin
+    /// role only — this deletes an artifact, not just reads one.</summary>
+    [HttpPost("{id:guid}/purge")]
+    [Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> Purge(Guid id, CancellationToken ct)
+    {
+        var response = await sender.Send(new PurgeScanBundleCommand(id), ct);
         return StatusCode((int)response.StatusCode, response);
     }
 }

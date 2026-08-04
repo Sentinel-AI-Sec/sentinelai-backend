@@ -119,7 +119,7 @@ public class NodeIdTests
     [Fact]
     public void Graph_node_factory_keeps_key_and_type_in_agreement()
     {
-        var node = GraphNode.Create(Guid.NewGuid(), NodeType.Resource, "Customer-Data-Bucket", Layer.Infra);
+        var node = GraphNode.Create(Guid.NewGuid(), Guid.NewGuid(), NodeType.Resource, "Customer-Data-Bucket", Layer.Infra);
 
         Assert.Equal("s3:customer-data-bucket", node.NodeKey);
         Assert.True(NodeId.TryParse(node.NodeKey, out var parsed, out _));

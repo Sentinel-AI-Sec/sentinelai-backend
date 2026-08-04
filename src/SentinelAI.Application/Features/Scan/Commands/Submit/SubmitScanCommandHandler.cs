@@ -100,6 +100,8 @@ public class SubmitScanCommandHandler(
         var job = new ScanJob
         {
             Id = Guid.CreateVersion7(),
+            // From the verified token, never from the request — SEC-32.
+            TenantId = caller.TenantId.Value,
             ProjectId = project.Id,
             TriggeredBy = caller.UserId,          // null for machine tokens, by design
             PrRef = metadata.PrRef,
@@ -116,6 +118,7 @@ public class SubmitScanCommandHandler(
         var bundleRecord = new ScanBundle
         {
             Id = Guid.CreateVersion7(),
+            TenantId = caller.TenantId.Value,
             ScanJobId = job.Id,
             RunnerSecretScan = metadata.RunnerSecretScan,
             IngressRedactionApplied = false,      // set by the redaction stage, not here

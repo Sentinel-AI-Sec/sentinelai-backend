@@ -45,9 +45,14 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ScanJobId");
+
+                    b.HasIndex("TenantId");
 
                     b.ToTable("Chains");
                 });
@@ -77,6 +82,9 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ChainId");
@@ -84,6 +92,8 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.HasIndex("EdgeId");
 
                     b.HasIndex("FindingId");
+
+                    b.HasIndex("TenantId");
 
                     b.ToTable("ChainHops");
                 });
@@ -112,11 +122,16 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ChainHopId");
 
                     b.HasIndex("ReportId");
+
+                    b.HasIndex("TenantId");
 
                     b.ToTable("Citations");
                 });
@@ -158,9 +173,14 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ScanJobId");
+
+                    b.HasIndex("TenantId");
 
                     b.ToTable("Findings");
                 });
@@ -192,6 +212,9 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("ToNodeId")
                         .HasColumnType("uniqueidentifier");
 
@@ -200,6 +223,8 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.HasIndex("FromNodeId");
 
                     b.HasIndex("ScanJobId");
+
+                    b.HasIndex("TenantId");
 
                     b.HasIndex("ToNodeId");
 
@@ -233,7 +258,12 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.Property<Guid>("ScanJobId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
 
                     b.HasIndex("ScanJobId", "NodeKey")
                         .IsUnique();
@@ -268,6 +298,43 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.ToTable("Projects");
                 });
 
+            modelBuilder.Entity("SentinelAI.Domain.Models.RefreshToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("RefreshTokens");
+                });
+
             modelBuilder.Entity("SentinelAI.Domain.Models.Report", b =>
                 {
                     b.Property<Guid>("Id")
@@ -294,10 +361,15 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ScanJobId")
                         .IsUnique();
+
+                    b.HasIndex("TenantId");
 
                     b.ToTable("Reports");
                 });
@@ -389,10 +461,15 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ScanJobId")
                         .IsUnique();
+
+                    b.HasIndex("TenantId");
 
                     b.ToTable("ScanBundles");
                 });
@@ -445,6 +522,9 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("TriggeredBy")
                         .HasColumnType("uniqueidentifier");
 
@@ -454,6 +534,8 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ProjectId");
+
+                    b.HasIndex("TenantId");
 
                     b.HasIndex("TriggeringUserId");
 
@@ -493,6 +575,13 @@ namespace SentinelAI.Infrastructure.Migrations
 
                     b.Property<string>("Email")
                         .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<bool>("IsEmailVerified")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Role")
@@ -503,6 +592,9 @@ namespace SentinelAI.Infrastructure.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Email")
+                        .IsUnique();
 
                     b.HasIndex("TenantId");
 
@@ -619,6 +711,17 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("SentinelAI.Domain.Models.RefreshToken", b =>
+                {
+                    b.HasOne("SentinelAI.Domain.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("SentinelAI.Domain.Models.Report", b =>
