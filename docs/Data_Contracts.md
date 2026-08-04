@@ -102,7 +102,7 @@ One thing in the map.
 Build with the factory, which sets key and type together:
 
 ```csharp
-GraphNode.Create(scanJobId, NodeType.Resource, "Customer-Data-Bucket", Layer.Infra);
+GraphNode.Create(tenantId, scanJobId, NodeType.Resource, "Customer-Data-Bucket", Layer.Infra);
 ```
 
 ### GraphEdge

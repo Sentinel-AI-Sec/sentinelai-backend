@@ -1,9 +1,10 @@
-﻿using SentinelAI.Domain.Enums;
+﻿using SentinelAI.Domain.Abstractions;
+using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.ValueObjects;
 
 namespace SentinelAI.Domain.Models
 {
-    public class GraphNode
+    public class GraphNode : ITenantOwned
     {
         /// <summary>
         /// Builds a node with <see cref="NodeKey"/> and <see cref="NodeType"/> guaranteed to
@@ -15,9 +16,10 @@ namespace SentinelAI.Domain.Models
         /// materializes through them, so this is the blessed path rather than the only one.
         /// </remarks>
         public static GraphNode Create(
-            Guid scanJobId, NodeType nodeType, string identifier, Layer layer, bool isHot = false) =>
+            Guid tenantId, Guid scanJobId, NodeType nodeType, string identifier, Layer layer, bool isHot = false) =>
             new()
             {
+                TenantId = tenantId,
                 ScanJobId = scanJobId,
                 NodeKey = NodeId.For(nodeType, identifier),
                 NodeType = nodeType,
@@ -26,6 +28,7 @@ namespace SentinelAI.Domain.Models
             };
 
         public Guid Id { get; set; }
+        public Guid TenantId { get; set; }
         public Guid ScanJobId { get; set; }
         public string NodeKey { get; set; } = string.Empty;
         public NodeType NodeType { get; set; }

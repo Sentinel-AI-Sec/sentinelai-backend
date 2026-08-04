@@ -1,8 +1,11 @@
-﻿namespace SentinelAI.Domain.Models
+﻿using SentinelAI.Domain.Abstractions;
+
+namespace SentinelAI.Domain.Models
 {
-    public class ScanBundle
+    public class ScanBundle : ITenantOwned
     {
         public Guid Id { get; set; }
+        public Guid TenantId { get; set; }
         public Guid ScanJobId { get; set; }
         public string RunnerSecretScan { get; set; } = string.Empty;
         public bool IngressRedactionApplied { get; set; }

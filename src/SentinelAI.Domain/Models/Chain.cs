@@ -1,10 +1,12 @@
-﻿using SentinelAI.Domain.Enums;
+﻿using SentinelAI.Domain.Abstractions;
+using SentinelAI.Domain.Enums;
 
 namespace SentinelAI.Domain.Models
 {
-    public class Chain
+    public class Chain : ITenantOwned
     {
         public Guid Id { get; set; }
+        public Guid TenantId { get; set; }
         public Guid ScanJobId { get; set; }
         public int HopCount { get; set; }
         public int Priority { get; set; }

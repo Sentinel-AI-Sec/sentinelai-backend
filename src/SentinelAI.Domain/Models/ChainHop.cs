@@ -1,8 +1,11 @@
-﻿namespace SentinelAI.Domain.Models
+﻿using SentinelAI.Domain.Abstractions;
+
+namespace SentinelAI.Domain.Models
 {
-    public class ChainHop
+    public class ChainHop : ITenantOwned
     {
         public Guid Id { get; set; }
+        public Guid TenantId { get; set; }
         public Guid ChainId { get; set; }
         public Guid FindingId { get; set; }
         public Guid? EdgeId { get; set; }

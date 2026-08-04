@@ -18,4 +18,11 @@ public interface ICallerContext
     bool IsAuthenticated { get; }
  
     bool HasScope(string scope);
+
+    /// <summary>
+    /// The caller's RBAC role (admin / analyst / viewer), or null. Machine tokens carry no
+    /// role — <c>scan:write</c> is a scope, not a role — so a role-gated action always
+    /// rejects them regardless of what scopes they hold.
+    /// </summary>
+    string? Role { get; }
 }

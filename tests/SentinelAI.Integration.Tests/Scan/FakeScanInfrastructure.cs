@@ -17,6 +17,7 @@ internal sealed class FakeCallerContext : ICallerContext
     public Guid? TenantId { get; init; } = Guid.NewGuid();
     public Guid? UserId { get; init; }
     public HashSet<string> Scopes { get; init; } = [AuthScopes.ScanWrite];
+    public string? Role { get; init; }
 
     public bool HasScope(string scope) => Scopes.Contains(scope);
 }
@@ -97,6 +98,11 @@ internal sealed class FakeUnitOfWork(IScanJobRepository scanJobRepository) : IUn
     private readonly Dictionary<Type, object> _repositories = [];
 
     public IScanJobRepository ScanJobRepository { get; } = scanJobRepository;
+
+    // Unused by SubmitScanCommandHandlerTests - throw if that ever changes rather than
+    // silently returning null and masking a missing fake.
+    public IUserRepository UserRepository => throw new NotSupportedException();
+    public IRefreshTokenRepository RefreshTokenRepository => throw new NotSupportedException();
 
     public int CompleteCallCount { get; private set; }
 

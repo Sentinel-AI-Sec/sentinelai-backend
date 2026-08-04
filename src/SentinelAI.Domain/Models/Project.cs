@@ -1,6 +1,8 @@
-﻿namespace SentinelAI.Domain.Models
+﻿using SentinelAI.Domain.Abstractions;
+
+namespace SentinelAI.Domain.Models
 {
-    public class Project
+    public class Project : ITenantOwned
     {
         public Guid Id { get; set; }
         public Guid TenantId { get; set; }

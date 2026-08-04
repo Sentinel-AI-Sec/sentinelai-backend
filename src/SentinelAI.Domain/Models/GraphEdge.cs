@@ -1,10 +1,12 @@
-﻿using SentinelAI.Domain.Enums;
+﻿using SentinelAI.Domain.Abstractions;
+using SentinelAI.Domain.Enums;
 
 namespace SentinelAI.Domain.Models
 {
-    public class GraphEdge
+    public class GraphEdge : ITenantOwned
     {
         public Guid Id { get; set; }
+        public Guid TenantId { get; set; }
         public Guid ScanJobId { get; set; }
         public Guid FromNodeId { get; set; }
         public Guid ToNodeId { get; set; }
