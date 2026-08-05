@@ -17,6 +17,9 @@ public static class DependencyInjection
 
         services.AddScoped<AuthTokenFactory>();
 
+        // SEC-14: the Normalize stage. Its IFindingExtractor set is supplied by Infrastructure.
+        services.AddScoped<Features.Scan.Normalization.NormalizationPipeline>();
+
         return services;
     }
 }
