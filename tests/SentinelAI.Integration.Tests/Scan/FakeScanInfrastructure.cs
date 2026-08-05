@@ -41,6 +41,11 @@ internal sealed class FakeBundleStore : IBundleStore
         return $"fake://{scanJobId}";
     }
 
+    // SubmitScanCommandHandler never reads findings back, so this fake does not model it —
+    // throwing keeps an accidental future dependency on it from passing silently.
+    public Task<IReadOnlyList<StoredBundleFile>> OpenFindingsAsync(string locator, CancellationToken ct)
+        => throw new NotSupportedException();
+
     public Task PurgeAsync(Guid scanJobId, CancellationToken ct)
     {
         Saved.Remove(scanJobId);

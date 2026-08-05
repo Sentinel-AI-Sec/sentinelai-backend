@@ -7,6 +7,7 @@ using SentinelAI.Infrastructure.Agents;
 using SentinelAI.Infrastructure.Data;
 using SentinelAI.Infrastructure.Implementation;
 using SentinelAI.Infrastructure.Implementation.Repositories;
+using SentinelAI.Infrastructure.Normalization;
 
 namespace SentinelAI.Infrastructure;
 
@@ -28,6 +29,14 @@ public static class DependencyInjection
         services.AddScoped<ICorpusVersionProvider, ConfiguredCorpusVersionProvider>();
         services.AddScoped<IBundleInspector, TarGzBundleInspector>();
         services.AddScoped<IBundleStore, FileSystemBundleStore>();
+
+        // ---- SEC-14: SARIF/JSON normalization -------------------------------------------
+        // One extractor per tool, all resolved together as IEnumerable<IFindingExtractor> by
+        // the NormalizationPipeline.
+        services.AddScoped<IFindingExtractor, RoslynSarifExtractor>();
+        services.AddScoped<IFindingExtractor, OsvJsonExtractor>();
+        services.AddScoped<IFindingExtractor, TrivySarifExtractor>();
+        services.AddScoped<IFindingExtractor, CheckovSarifExtractor>();
 
         services.AddScoped<IScanJobRepository, ScanJobRepository>();
         services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
