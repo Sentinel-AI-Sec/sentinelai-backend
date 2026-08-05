@@ -28,6 +28,30 @@ namespace SentinelAI.Domain.Models
         /// </remarks>
         public string? CheckId { get; set; }
 
+        /// <summary>
+        /// Where the tool says the problem is, normalized: a repo-relative <c>path</c> or
+        /// <c>path:line</c> for code and infrastructure, the package coordinate
+        /// <c>name@version</c> for dependencies. Null when the tool reported no location.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Carried from the extractor to the unify step (SEC-16), which uses it twice: to tell
+        /// two findings apart when deduplicating, and as the subject the
+        /// <see cref="NodeRef"/> is built from.
+        /// </para>
+        /// <para>
+        /// Normalized on the way in, and that is load-bearing: Roslyn and OSV-Scanner emit the
+        /// build agent's absolute author path, which would make the same finding scanned on two
+        /// machines dedup as two findings on two nodes, silently.
+        /// </para>
+        /// <para>
+        /// Not a column, for the same reason as <see cref="CheckId"/>: the D2 <c>findings</c>
+        /// table is fixed and has no location. It is spent at the unify step — the durable
+        /// result is <see cref="NodeRef"/>, which <em>is</em> in the contract.
+        /// </para>
+        /// </remarks>
+        public string? Location { get; set; }
+
         public string NodeRef { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
         public bool Redacted { get; set; }

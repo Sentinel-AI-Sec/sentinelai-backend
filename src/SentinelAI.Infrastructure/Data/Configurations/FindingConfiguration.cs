@@ -15,5 +15,11 @@ public class FindingConfiguration : IEntityTypeConfiguration<Finding>
         // lookup and is spent there. The findings table has no check_id column by design — the
         // resolved cwe_id is the durable result, the tool's rule id is not.
         builder.Ignore(f => f.CheckId);
+
+        // Same treatment, same reason (SEC-16): the tool-reported location travels from the
+        // extractor to the unify step, which spends it building node_ref. The findings table
+        // has no location column — node_ref is the durable result, and it is the one the graph
+        // joins on.
+        builder.Ignore(f => f.Location);
     }
 }

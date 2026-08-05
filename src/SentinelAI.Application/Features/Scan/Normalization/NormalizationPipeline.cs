@@ -6,9 +6,9 @@ using SentinelAI.Domain.Models;
 namespace SentinelAI.Application.Features.Scan.Normalization;
 
 /// <summary>
-/// The Normalize stage (SEC-14 + SEC-15): reads a stored bundle's findings files, runs each
-/// through the extractor for its tool, resolves any missing CWE from the rule-mapping table,
-/// and returns one combined list of canonical <see cref="Finding"/>s.
+/// The Normalize stage (SEC-14 + SEC-15 + SEC-16): reads a stored bundle's findings files, runs
+/// each through the extractor for its tool, resolves any missing CWE from the rule-mapping
+/// table, and emits one deduplicated set in which every finding carries a node reference.
 /// </summary>
 /// <remarks>
 /// It depends only on the <see cref="IFindingExtractor"/> abstraction and the
@@ -16,11 +16,16 @@ namespace SentinelAI.Application.Features.Scan.Normalization;
 /// swapping a tool is a change in Infrastructure, not here. One unreadable file costs that
 /// file's findings and nothing else, the same graceful degradation the runner applies when a
 /// scanner misbehaves.
+/// <para>
+/// The unified set is the single output of the stage: downstream — the graph builder and
+/// retrieval — receives one tidy list, never the per-scanner piles.
+/// </para>
 /// </remarks>
 public sealed class NormalizationPipeline(
     IEnumerable<IFindingExtractor> extractors,
     IBundleStore bundleStore,
     RuleMappingResolver ruleMappings,
+    FindingUnifier unifier,
     ILogger<NormalizationPipeline> logger)
 {
     // How a findings file name maps to a tool: its prefix, and the extension that tool emits.
@@ -72,12 +77,18 @@ public sealed class NormalizationPipeline(
         // beats a query per result.
         await ruleMappings.ResolveAsync(findings, ct);
 
-        logger.LogInformation(
-            "Normalized {Count} finding(s) from {Files} file(s) for job {JobId}; {Unlinked} still carry no CWE or CVE",
-            findings.Count, files.Count, scanJobId,
-            findings.Count(f => string.IsNullOrWhiteSpace(f.CweId) && string.IsNullOrWhiteSpace(f.CveId)));
+        // SEC-16: five piles become one set, and every finding gets the node reference the
+        // graph attaches it by. Last, and after the CWE resolution above, because both of the
+        // earlier steps can change what a finding says about itself.
+        var unified = unifier.Unify(findings);
 
-        return findings;
+        logger.LogInformation(
+            "Normalized {Count} finding(s) from {Files} file(s) for job {JobId} into {Unified} " +
+            "unified; {Unlinked} still carry no CWE or CVE",
+            findings.Count, files.Count, scanJobId, unified.Count,
+            unified.Count(f => string.IsNullOrWhiteSpace(f.CweId) && string.IsNullOrWhiteSpace(f.CveId)));
+
+        return unified;
     }
 
     private IFindingExtractor? ResolveExtractor(string fileName)

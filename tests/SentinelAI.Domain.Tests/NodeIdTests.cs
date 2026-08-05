@@ -110,7 +110,10 @@ public class NodeIdTests
             .Select(entry => entry[(entry.IndexOf('=') + 1)..].Trim())
             .ToArray();
 
-        Assert.Equal(5, keys.Length);
+        // The brief grew from five nodes to nine when the stub gained its two false candidate
+        // paths. The count is here only to catch the parse silently matching nothing — what
+        // this test is actually about is the assertion below.
+        Assert.Equal(9, keys.Length);
         Assert.All(keys, key => Assert.True(
             NodeId.IsCanonical(key),
             $"'{key}' is not a node id this codebase could produce."));

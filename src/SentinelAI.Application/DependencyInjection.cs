@@ -24,6 +24,9 @@ public static class DependencyInjection
         // implementation supplied by Infrastructure.
         services.AddScoped<Features.Scan.Normalization.RuleMappingResolver>();
 
+        // SEC-16: the unify step that closes that stage. Pure — no port to supply.
+        services.AddScoped<Features.Scan.Normalization.FindingUnifier>();
+
         return services;
     }
 }

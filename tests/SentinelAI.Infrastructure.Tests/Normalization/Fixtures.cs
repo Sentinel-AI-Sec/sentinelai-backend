@@ -8,6 +8,13 @@ namespace SentinelAI.Infrastructure.Tests.Normalization;
 /// a Trivy vuln, a GHSA-only OSV advisory. Kept tiny so a failing assertion points at the field
 /// it is about, not at noise.
 /// </summary>
+/// <remarks>
+/// The locations mirror the shapes the committed fixture's real scanners emit, because the
+/// differences are load-bearing: Roslyn reports the build agent's absolute author path,
+/// Checkov and Trivy report repo-relative ones, and Trivy names the vulnerable package only in
+/// the message body. Sample them wrong and the normalization looks correct here while
+/// producing machine-dependent dedup keys and node references on real output.
+/// </remarks>
 internal static class Fixtures
 {
     public static Stream ToStream(string content) => new MemoryStream(Encoding.UTF8.GetBytes(content));
@@ -32,7 +39,15 @@ internal static class Fixtures
             {
               "ruleId": "SCS0028",
               "level": "warning",
-              "message": { "text": "Unsafe deserialization of untrusted data in OrderService." }
+              "message": { "text": "Unsafe deserialization of untrusted data in OrderService." },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": { "uri": "file:///C:/Users/PC_STORE/Downloads/sentinelai-fixture_2/sentinelai-fixture/src/OrderApp/Controllers/OrdersController.cs" },
+                    "region": { "startLine": 16, "startColumn": 28 }
+                  }
+                }
+              ]
             }
           ]
         }
@@ -51,8 +66,14 @@ internal static class Fixtures
             { "id": "CKV_AWS_20", "properties": { "tags": ["CWE-284"] } }
           ],
           "results": [
-            { "ruleId": "CKV_AWS_20", "level": "error", "message": "S3 bucket allows public read access." },
-            { "ruleId": "CKV_DOCKER_2", "level": "warning", "message": "Dockerfile has no HEALTHCHECK instruction." }
+            {
+              "ruleId": "CKV_AWS_20", "level": "error", "message": "S3 bucket allows public read access.",
+              "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "infra/main.tf" }, "region": { "startLine": 41 } } }]
+            },
+            {
+              "ruleId": "CKV_DOCKER_2", "level": "warning", "message": "Dockerfile has no HEALTHCHECK instruction.",
+              "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "Dockerfile" }, "region": { "startLine": 1 } } }]
+            }
           ]
         }
       ]
@@ -75,8 +96,16 @@ internal static class Fixtures
             }
           },
           "results": [
-            { "ruleId": "CVE-2021-44228", "level": "error", "message": { "text": "log4j RCE in org.apache.logging.log4j." } },
-            { "ruleId": "AVD-AWS-0089", "level": "warning", "message": { "text": "S3 bucket access logging is disabled." } }
+            {
+              "ruleId": "CVE-2021-44228", "level": "error",
+              "message": { "text": "Package: Newtonsoft.Json\nInstalled Version: 9.0.1\nVulnerability CVE-2021-44228\nSeverity: CRITICAL" },
+              "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "src/OrderApp/OrderApp.deps.json" }, "region": { "startLine": 310 } } }]
+            },
+            {
+              "ruleId": "AVD-AWS-0089", "level": "warning",
+              "message": { "text": "S3 bucket access logging is disabled." },
+              "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "infra/main.tf" }, "region": { "startLine": 12 } } }]
+            }
           ]
         }
       ]

@@ -6,6 +6,7 @@ using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
 using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
+using SentinelAI.Domain.ValueObjects;
 using SentinelAI.Infrastructure.Normalization;
 
 namespace SentinelAI.Infrastructure.Tests.Normalization;
@@ -30,7 +31,7 @@ public class NormalizationPipelineTests
             NullLogger<RuleMappingResolver>.Instance);
 
         return new NormalizationPipeline(
-            extractors, store, resolver, NullLogger<NormalizationPipeline>.Instance);
+            extractors, store, resolver, new FindingUnifier(), NullLogger<NormalizationPipeline>.Instance);
     }
 
     [Fact]
@@ -57,10 +58,53 @@ public class NormalizationPipelineTests
         Assert.Equal(3, findings.Count(f => f.Layer == Layer.Dep));
         Assert.Equal(4, findings.Count(f => f.Layer == Layer.Infra));
 
-        // Every finding is stamped and left ready for the graph stage.
+        // Every finding is stamped and ready for the graph stage: the extractors leave NodeRef
+        // empty, and the unify step (SEC-16) is what fills it before the stage returns.
         Assert.All(findings, f => Assert.Equal(Job, f.ScanJobId));
         Assert.All(findings, f => Assert.False(string.IsNullOrEmpty(f.SourceTool)));
-        Assert.All(findings, f => Assert.Equal(string.Empty, f.NodeRef));
+        Assert.All(findings, f => Assert.True(NodeId.IsCanonical(f.NodeRef), $"not canonical: '{f.NodeRef}'"));
+    }
+
+    [Fact]
+    public async Task Two_tools_reporting_the_same_package_land_on_one_node()
+    {
+        // Both fixtures describe Newtonsoft.Json 9.0.1. They stay separate findings — two tools
+        // saw it — but they must decorate the same graph node, or the dependency layer splits
+        // into per-tool islands and no chain crosses it (SEC-03).
+        var store = new StubBundleStore
+        {
+            ["findings/osv.json"] = Fixtures.OsvNativeJson,
+            ["findings/trivy.sarif"] = Fixtures.TrivySarifV2,
+        };
+
+        var findings = await Build(store).NormalizeAsync("loc", Tenant, Job, CancellationToken.None);
+
+        var deps = findings.Where(f => f.Layer == Layer.Dep).ToList();
+        Assert.Equal(3, deps.Count);                                  // 2 OSV + 1 Trivy
+        Assert.Contains(deps, f => f.SourceTool == ScannerNames.Trivy);
+        Assert.All(deps, f => Assert.Equal("pkg:newtonsoft.json:9.0.1", f.NodeRef));
+    }
+
+    [Fact]
+    public async Task The_same_bundle_scanned_on_two_machines_unifies_identically()
+    {
+        // The B7 hazard end to end: Roslyn bakes the build agent's absolute path into its
+        // SARIF. If that path survives into the dedup key and the node reference, one PR
+        // scanned twice produces two findings on two nodes and nothing errors.
+        var windows = new StubBundleStore { ["findings/roslyn.sarif"] = Fixtures.RoslynSarifV2 };
+        var linux = new StubBundleStore
+        {
+            ["findings/roslyn.sarif"] = Fixtures.RoslynSarifV2.Replace(
+                "file:///C:/Users/PC_STORE/Downloads/sentinelai-fixture_2/sentinelai-fixture/src/",
+                "file:///home/runner/work/sentinelai-fixture/sentinelai-fixture/src/"),
+        };
+
+        var fromWindows = await Build(windows).NormalizeAsync("loc", Tenant, Job, CancellationToken.None);
+        var fromLinux = await Build(linux).NormalizeAsync("loc", Tenant, Job, CancellationToken.None);
+
+        Assert.Equal(
+            Assert.Single(fromWindows).NodeRef,
+            Assert.Single(fromLinux).NodeRef);
     }
 
     [Fact]

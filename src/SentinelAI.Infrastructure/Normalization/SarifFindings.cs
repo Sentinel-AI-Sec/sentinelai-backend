@@ -24,7 +24,10 @@ internal static class SarifFindings
             // Kept for the rule-mapping step (SEC-15): when CweId came back null above, the
             // rule id is the only key that can still resolve one. Not persisted.
             CheckId = result.RuleId,
-            // Left empty on purpose: the node key is built by NodeId at the graph stage, never
+            // Kept for the unify step (SEC-16), which deduplicates on it and builds the node
+            // key from it. Already normalized to repo-relative by the reader. Not persisted.
+            Location = result.Location,
+            // Left empty on purpose: the node key is built by NodeId at the unify stage, never
             // by concatenation here (SEC-03).
             NodeRef = string.Empty,
             Message = result.Message,

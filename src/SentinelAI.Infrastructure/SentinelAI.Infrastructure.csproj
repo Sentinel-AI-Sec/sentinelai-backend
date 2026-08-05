@@ -11,6 +11,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The SARIF reader and the path normalizer are internal on purpose: they are file-format
+         details, not API. They still need direct tests — a path normalizer proven only through
+         a whole pipeline is a normalizer whose edge cases are untested. -->
+    <InternalsVisibleTo Include="SentinelAI.Infrastructure.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Agents.AI" Version="1.15.0" />
     <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.15.0" />
     <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.15.0" />

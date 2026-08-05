@@ -57,7 +57,11 @@ public sealed class OsvJsonExtractor : IFindingExtractor
                     // OSV's rule id is the advisory id itself (GHSA-…/OSV-…), which is what a
                     // rule_mappings row for this tool is keyed on. Not persisted (SEC-15).
                     CheckId = GetString(vuln, "id"),
-                    // Built by NodeId at the graph stage, never here (SEC-03).
+                    // The vulnerable package, not the lock file that lists it — this is what
+                    // makes an OSV finding and a Trivy finding about the same package meet on
+                    // one graph node at the unify step (SEC-16). Not persisted.
+                    Location = ResolvePackage(package),
+                    // Built by NodeId at the unify stage, never here (SEC-03).
                     NodeRef = string.Empty,
                     Message = ResolveMessage(vuln),
                     Redacted = false,
@@ -66,6 +70,19 @@ public sealed class OsvJsonExtractor : IFindingExtractor
 
             return findings;
         }
+    }
+
+    /// <summary>
+    /// The package coordinate as <c>name@version</c>, from OSV's <c>package</c> block.
+    /// </summary>
+    private static string? ResolvePackage(JsonElement packageEntry)
+    {
+        var package = GetProp(packageEntry, "package");
+        var name = GetString(package, "name");
+        if (string.IsNullOrWhiteSpace(name)) return null;
+
+        var version = GetString(package, "version");
+        return string.IsNullOrWhiteSpace(version) ? name : $"{name}@{version}";
     }
 
     /// <summary>Prefer a CVE alias (the widely-linkable id); fall back to the native id, e.g. a GHSA.</summary>
