@@ -82,12 +82,37 @@ What a scanner reported.
 
 | Field | Type | Notes |
 |---|---|---|
-| `SourceTool` | `string` | `semgrep` \| `roslyn` \| `dependency-check` \| `trivy` \| `checkov` |
+| `SourceTool` | `string` | `roslyn` \| `osv` \| `trivy` \| `checkov` — see `ScannerNames` |
 | `Layer` | `Layer` | `Code` \| `Dep` \| `Infra` |
 | `Severity` | `int` | 0 lowest → 4 highest |
 | `CweId`, `CveId` | `string?` | Either may be absent |
 | `NodeRef` | `string` | **A node key.** Build it with `NodeId`. |
 | `Redacted` | `bool` | Set when the message held customer data |
+| `CheckId` | `string?` | *Not persisted.* The tool's own rule id, e.g. `CKV_AWS_20` |
+| `Location` | `string?` | *Not persisted.* Repo-relative `path` / `path:line`, or `name@version` for a dependency |
+
+**The two in-pipeline fields.** `CheckId` and `Location` are `Ignore`d in
+`FindingConfiguration` — the D2 `findings` table has neither column, and the contract is fixed
+(SEC-03). They carry from the extractor to the steps that spend them, and the durable results
+are `CweId` and `NodeRef`, which *are* in the contract:
+
+- `CheckId` resolves a missing `CweId` from `rule_mappings` (SEC-15), and — with `Location` —
+  tells two findings at the same place apart when unifying (SEC-16). Checkov reports
+  `CKV_AWS_288`, `_289` and `_290` on the very same Terraform line and they are three different
+  problems, so a dedup key without the rule id deletes two of them silently.
+- `Location` is the subject `NodeRef` is built from.
+
+`Location` is normalized on the way in and this is load-bearing: Roslyn and OSV-Scanner emit the
+build agent's absolute author path
+(`file:///C:/Users/…/sentinelai-fixture/src/OrderApp/…`). Left as-is it reaches both the dedup
+key and the node key, so the same finding scanned on two machines becomes two findings on two
+nodes, silently. `Infrastructure/Normalization/SourcePath` is what prevents that.
+
+**Who fills `NodeRef`.** Not the extractors — they leave it empty. The unify step (SEC-16)
+builds it through `NodeId` from the layer and the location: `Dep` → `pkg:`, `Code` → `code:`,
+`Infra` → a resource key. It is file-grained today because a file path is the finest subject the
+scanners report; when the Terraform and code readers land (SEC-17/SEC-18) it tightens to
+resource- and symbol-grained keys.
 
 ### GraphNode
 One thing in the map.

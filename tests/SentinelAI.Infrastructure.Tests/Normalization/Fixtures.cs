@@ -8,6 +8,13 @@ namespace SentinelAI.Infrastructure.Tests.Normalization;
 /// a Trivy vuln, a GHSA-only OSV advisory. Kept tiny so a failing assertion points at the field
 /// it is about, not at noise.
 /// </summary>
+/// <remarks>
+/// The locations mirror the shapes the committed fixture's real scanners emit, because the
+/// differences are load-bearing: Roslyn reports the build agent's absolute author path,
+/// Checkov and Trivy report repo-relative ones, and Trivy names the vulnerable package only in
+/// the message body. Sample them wrong and the normalization looks correct here while
+/// producing machine-dependent dedup keys and node references on real output.
+/// </remarks>
 internal static class Fixtures
 {
     public static Stream ToStream(string content) => new MemoryStream(Encoding.UTF8.GetBytes(content));
@@ -32,7 +39,15 @@ internal static class Fixtures
             {
               "ruleId": "SCS0028",
               "level": "warning",
-              "message": { "text": "Unsafe deserialization of untrusted data in OrderService." }
+              "message": { "text": "Unsafe deserialization of untrusted data in OrderService." },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": { "uri": "file:///C:/Users/PC_STORE/Downloads/sentinelai-fixture_2/sentinelai-fixture/src/OrderApp/Controllers/OrdersController.cs" },
+                    "region": { "startLine": 16, "startColumn": 28 }
+                  }
+                }
+              ]
             }
           ]
         }
@@ -51,8 +66,14 @@ internal static class Fixtures
             { "id": "CKV_AWS_20", "properties": { "tags": ["CWE-284"] } }
           ],
           "results": [
-            { "ruleId": "CKV_AWS_20", "level": "error", "message": "S3 bucket allows public read access." },
-            { "ruleId": "CKV_DOCKER_2", "level": "warning", "message": "Dockerfile has no HEALTHCHECK instruction." }
+            {
+              "ruleId": "CKV_AWS_20", "level": "error", "message": "S3 bucket allows public read access.",
+              "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "infra/main.tf" }, "region": { "startLine": 41 } } }]
+            },
+            {
+              "ruleId": "CKV_DOCKER_2", "level": "warning", "message": "Dockerfile has no HEALTHCHECK instruction.",
+              "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "Dockerfile" }, "region": { "startLine": 1 } } }]
+            }
           ]
         }
       ]
@@ -75,8 +96,73 @@ internal static class Fixtures
             }
           },
           "results": [
-            { "ruleId": "CVE-2021-44228", "level": "error", "message": { "text": "log4j RCE in org.apache.logging.log4j." } },
-            { "ruleId": "AVD-AWS-0089", "level": "warning", "message": { "text": "S3 bucket access logging is disabled." } }
+            {
+              "ruleId": "CVE-2021-44228", "level": "error",
+              "message": { "text": "Package: Newtonsoft.Json\nInstalled Version: 9.0.1\nVulnerability CVE-2021-44228\nSeverity: CRITICAL" },
+              "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "src/OrderApp/OrderApp.deps.json" }, "region": { "startLine": 310 } } }]
+            },
+            {
+              "ruleId": "AVD-AWS-0089", "level": "warning",
+              "message": { "text": "S3 bucket access logging is disabled." },
+              "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "infra/main.tf" }, "region": { "startLine": 12 } } }]
+            }
+          ]
+        }
+      ]
+    }
+    """;
+
+    // Checkov against the Dockerfile — SARIF v2, one result, so the two Checkov files in a
+    // bundle contribute a distinct number of findings rather than the same sample twice.
+    public const string CheckovDockerSarifV2 = """
+    {
+      "version": "2.1.0",
+      "runs": [
+        {
+          "tool": { "driver": { "name": "Checkov", "rules": [] } },
+          "results": [
+            {
+              "ruleId": "CKV_DOCKER_3", "level": "warning",
+              "message": { "text": "Image runs as root." },
+              "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "Dockerfile" }, "region": { "startLine": 3 } } }]
+            }
+          ]
+        }
+      ]
+    }
+    """;
+
+    // OSV-Scanner — SARIF. This is the shape the runner actually writes (scripts/run-scanners.sh
+    // emits --format sarif), and the shape the pipeline used to route out entirely. Two things
+    // it carries that the "SARIF drops the linking ids" warning claimed it would not: the CVE
+    // is the ruleId, and the package coordinate is stated in the message.
+    public const string OsvSarifV2 = """
+    {
+      "version": "2.1.0",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "osv-scanner",
+              "rules": [
+                { "id": "CVE-2024-21907", "shortDescription": { "text": "CVE-2024-21907: Improper handling in Newtonsoft.Json" } },
+                { "id": "GHSA-2cmq-823j-5qj8", "shortDescription": { "text": "Out-of-bounds write in SixLabors ImageSharp" } }
+              ]
+            }
+          },
+          "results": [
+            {
+              "ruleId": "CVE-2024-21907",
+              "level": "warning",
+              "message": { "text": "Package 'Newtonsoft.Json@9.0.1' is vulnerable to 'CVE-2024-21907' (also known as 'GHSA-5crp-9r3c-p9vr')." },
+              "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "file:///home/runner/work/repo/repo/src/OrderApp/packages.lock.json" } } }]
+            },
+            {
+              "ruleId": "GHSA-2cmq-823j-5qj8",
+              "level": "error",
+              "message": { "text": "Package 'SixLabors.ImageSharp@1.0.4' is vulnerable to 'GHSA-2cmq-823j-5qj8'." },
+              "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "file:///home/runner/work/repo/repo/src/OrderApp/packages.lock.json" } } }]
+            }
           ]
         }
       ]

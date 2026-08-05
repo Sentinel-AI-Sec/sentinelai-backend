@@ -13,7 +13,8 @@ internal sealed record SarifResult(
     string Message,
     string? CweId,
     string? CveId,
-    double? SecuritySeverity);
+    double? SecuritySeverity,
+    string? Location);
 
 /// <summary>
 /// Reads SARIF into <see cref="SarifResult"/>s, tolerating both v1 and v2. Every scanner that
@@ -43,32 +44,41 @@ internal static class SarifReader
 
         using (doc)
         {
-            var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object ||
-                !root.TryGetProperty("runs", out var runs) ||
-                runs.ValueKind != JsonValueKind.Array)
-            {
-                // A SARIF file with no runs is empty, not broken — nothing to normalize.
-                return [];
-            }
-
-            var results = new List<SarifResult>();
-            foreach (var run in runs.EnumerateArray())
-            {
-                var rules = BuildRuleIndex(run);
-
-                if (!run.TryGetProperty("results", out var runResults) ||
-                    runResults.ValueKind != JsonValueKind.Array)
-                {
-                    continue;
-                }
-
-                foreach (var result in runResults.EnumerateArray())
-                    results.Add(Flatten(result, rules));
-            }
-
-            return results;
+            return Read(doc.RootElement);
         }
+    }
+
+    /// <summary>
+    /// The same walk over an already-parsed document, for a caller that had to inspect the root
+    /// before it knew the file was SARIF — <see cref="OsvExtractor"/> reads either OSV shape and
+    /// tells them apart by the presence of <c>runs</c>, so it cannot re-read the stream.
+    /// </summary>
+    public static IReadOnlyList<SarifResult> Read(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("runs", out var runs) ||
+            runs.ValueKind != JsonValueKind.Array)
+        {
+            // A SARIF file with no runs is empty, not broken — nothing to normalize.
+            return [];
+        }
+
+        var results = new List<SarifResult>();
+        foreach (var run in runs.EnumerateArray())
+        {
+            var rules = BuildRuleIndex(run);
+
+            if (!run.TryGetProperty("results", out var runResults) ||
+                runResults.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var result in runResults.EnumerateArray())
+                results.Add(Flatten(result, rules));
+        }
+
+        return results;
     }
 
     /// <summary>
@@ -142,7 +152,59 @@ internal static class SarifReader
         var cwe = LinkingKeys.FindCwe(CweCandidates(ruleId, result, rule));
         var cve = LinkingKeys.FindCve([ruleId, message, .. TagValues(result), .. RawProperties(result)]);
 
-        return new SarifResult(ruleId, level, message, cwe, cve, securitySeverity);
+        return new SarifResult(ruleId, level, message, cwe, cve, securitySeverity, ResolveLocation(result));
+    }
+
+    /// <summary>
+    /// The first reported location, normalized to a repo-relative <c>path:line</c> (SEC-16).
+    /// </summary>
+    /// <remarks>
+    /// Only the first: SARIF allows several locations per result, but the downstream node
+    /// reference is one node, and every scanner in this toolchain reports the primary site
+    /// first. A logical location (a fully-qualified symbol) is preferred when the tool supplies
+    /// one, because it is finer-grained than a file and already machine-independent.
+    /// </remarks>
+    private static string? ResolveLocation(JsonElement result)
+    {
+        if (!result.TryGetProperty("locations", out var locations) ||
+            locations.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var location in locations.EnumerateArray())
+        {
+            if (FirstLogicalLocation(location) is { } symbol)
+                return symbol;
+
+            var physical = GetProp(location, "physicalLocation");
+            var uri = GetString(GetProp(physical, "artifactLocation"), "uri");
+            if (uri is null) continue;
+
+            var line = GetProp(physical, "region") is { } region &&
+                       region.TryGetProperty("startLine", out var startLine) &&
+                       startLine.TryGetInt32(out var value)
+                ? value
+                : (int?)null;
+
+            return SourcePath.WithLine(uri, line);
+        }
+
+        return null;
+    }
+
+    private static string? FirstLogicalLocation(JsonElement location)
+    {
+        if (GetProp(location, "logicalLocations") is not { ValueKind: JsonValueKind.Array } logical)
+            return null;
+
+        foreach (var entry in logical.EnumerateArray())
+        {
+            if (GetString(entry, "fullyQualifiedName") is { Length: > 0 } name)
+                return name;
+        }
+
+        return null;
     }
 
     /// <summary>v2 puts the id under <c>ruleId</c> or <c>rule.id</c>; v1 uses <c>ruleId</c>.</summary>
