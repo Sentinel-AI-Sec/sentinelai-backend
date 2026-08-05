@@ -6,6 +6,7 @@ using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
 using SentinelAI.Infrastructure.Agents;
 using SentinelAI.Infrastructure.Data;
+using SentinelAI.Infrastructure.Knowledge;
 using SentinelAI.Infrastructure.Implementation;
 using SentinelAI.Infrastructure.Implementation.Repositories;
 using SentinelAI.Infrastructure.Normalization;
@@ -41,6 +42,13 @@ public static class DependencyInjection
 
         // ---- SEC-15: rule-mapping resolution (exact SQL lookup) --------------------------
         services.AddScoped<IRuleMappingLookup, SqlRuleMappingLookup>();
+
+        // ---- SEC-45: knowledge retrieval -------------------------------------------------
+        // A canned-answer stub so the walking skeleton can cross the retrieval seam before the
+        // corpus exists. It logs a warning on every call. Replacing it with the Qdrant
+        // retriever (SEC-09) is a change to this line and nothing upstream — which is the
+        // property the thin slice was built to establish.
+        services.AddScoped<IKnowledgeRetriever, SeedKnowledgeRetriever>();
 
         services.AddScoped<IScanJobRepository, ScanJobRepository>();
         services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));

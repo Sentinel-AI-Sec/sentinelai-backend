@@ -27,6 +27,13 @@ public static class DependencyInjection
         // SEC-16: the unify step that closes that stage. Pure — no port to supply.
         services.AddScoped<Features.Scan.Normalization.FindingUnifier>();
 
+        // SEC-45: the walking skeleton. Every stage below is pure except the two ports it
+        // composes — IKnowledgeRetriever and IDebateEngine — which Infrastructure supplies.
+        services.AddScoped<Features.Scan.Graph.GraphSeeder>();
+        services.AddScoped<Features.Scan.Graph.ScanBriefRenderer>();
+        services.AddScoped<Features.Scan.Reporting.ReportBuilder>();
+        services.AddScoped<Features.Scan.ThinSlice.ThinSlicePipeline>();
+
         return services;
     }
 }
