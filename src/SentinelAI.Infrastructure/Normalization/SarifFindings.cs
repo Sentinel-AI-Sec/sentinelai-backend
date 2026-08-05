@@ -21,6 +21,9 @@ internal static class SarifFindings
             Severity = SeverityScale.FromSarif(result.Level, result.SecuritySeverity),
             CweId = result.CweId,
             CveId = result.CveId,
+            // Kept for the rule-mapping step (SEC-15): when CweId came back null above, the
+            // rule id is the only key that can still resolve one. Not persisted.
+            CheckId = result.RuleId,
             // Left empty on purpose: the node key is built by NodeId at the graph stage, never
             // by concatenation here (SEC-03).
             NodeRef = string.Empty,

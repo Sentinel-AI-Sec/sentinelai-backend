@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using SentinelAI.Application.Abstractions;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
 using SentinelAI.Infrastructure.Agents;
@@ -37,6 +38,9 @@ public static class DependencyInjection
         services.AddScoped<IFindingExtractor, OsvJsonExtractor>();
         services.AddScoped<IFindingExtractor, TrivySarifExtractor>();
         services.AddScoped<IFindingExtractor, CheckovSarifExtractor>();
+
+        // ---- SEC-15: rule-mapping resolution (exact SQL lookup) --------------------------
+        services.AddScoped<IRuleMappingLookup, SqlRuleMappingLookup>();
 
         services.AddScoped<IScanJobRepository, ScanJobRepository>();
         services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));

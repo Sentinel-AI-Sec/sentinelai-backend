@@ -54,6 +54,9 @@ public sealed class OsvJsonExtractor : IFindingExtractor
                     Severity = ResolveSeverity(vuln),
                     CweId = ResolveCwe(vuln),
                     CveId = ResolveVulnId(vuln),
+                    // OSV's rule id is the advisory id itself (GHSA-…/OSV-…), which is what a
+                    // rule_mappings row for this tool is keyed on. Not persisted (SEC-15).
+                    CheckId = GetString(vuln, "id"),
                     // Built by NodeId at the graph stage, never here (SEC-03).
                     NodeRef = string.Empty,
                     Message = ResolveMessage(vuln),

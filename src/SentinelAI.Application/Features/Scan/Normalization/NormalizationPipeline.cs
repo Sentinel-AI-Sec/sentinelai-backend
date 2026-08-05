@@ -6,8 +6,9 @@ using SentinelAI.Domain.Models;
 namespace SentinelAI.Application.Features.Scan.Normalization;
 
 /// <summary>
-/// The Normalize stage (SEC-14): reads a stored bundle's findings files, runs each through the
-/// extractor for its tool, and returns one combined list of canonical <see cref="Finding"/>s.
+/// The Normalize stage (SEC-14 + SEC-15): reads a stored bundle's findings files, runs each
+/// through the extractor for its tool, resolves any missing CWE from the rule-mapping table,
+/// and returns one combined list of canonical <see cref="Finding"/>s.
 /// </summary>
 /// <remarks>
 /// It depends only on the <see cref="IFindingExtractor"/> abstraction and the
@@ -19,6 +20,7 @@ namespace SentinelAI.Application.Features.Scan.Normalization;
 public sealed class NormalizationPipeline(
     IEnumerable<IFindingExtractor> extractors,
     IBundleStore bundleStore,
+    RuleMappingResolver ruleMappings,
     ILogger<NormalizationPipeline> logger)
 {
     // How a findings file name maps to a tool: its prefix, and the extension that tool emits.
@@ -62,9 +64,18 @@ public sealed class NormalizationPipeline(
             }
         }
 
+        // SEC-15: close the CWE gaps before the findings leave this stage. Everything
+        // downstream — the RAG exact filter, the graph decoration, the chain hops — joins on
+        // the linking key, so a finding that leaves here without one is invisible to all of it.
+        // Placed after extraction rather than inside it on purpose: the extractors are pure,
+        // synchronous parsers with no database, and one batched lookup for the whole bundle
+        // beats a query per result.
+        await ruleMappings.ResolveAsync(findings, ct);
+
         logger.LogInformation(
-            "Normalized {Count} finding(s) from {Files} file(s) for job {JobId}",
-            findings.Count, files.Count, scanJobId);
+            "Normalized {Count} finding(s) from {Files} file(s) for job {JobId}; {Unlinked} still carry no CWE or CVE",
+            findings.Count, files.Count, scanJobId,
+            findings.Count(f => string.IsNullOrWhiteSpace(f.CweId) && string.IsNullOrWhiteSpace(f.CveId)));
 
         return findings;
     }
