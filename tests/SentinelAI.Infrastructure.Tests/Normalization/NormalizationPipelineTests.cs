@@ -1,4 +1,3 @@
-using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using SentinelAI.Application.Abstractions;
 using SentinelAI.Application.Features.Scan.Normalization;
@@ -21,7 +20,7 @@ public class NormalizationPipelineTests
         IFindingExtractor[] extractors =
         [
             new RoslynSarifExtractor(),
-            new OsvJsonExtractor(),
+            new OsvExtractor(),
             new TrivySarifExtractor(),
             new CheckovSarifExtractor(),
         ];
@@ -44,10 +43,8 @@ public class NormalizationPipelineTests
             ["findings/osv.json"] = Fixtures.OsvNativeJson,
             ["findings/trivy.sarif"] = Fixtures.TrivySarifV2,
             ["findings/checkov_infra.sarif"] = Fixtures.CheckovSarifV1,   // 2 infra
-            ["findings/checkov_docker.sarif"] = SingleCheckovResult,      // 1 infra
-            // Deliberately ignored: OSV is read as native JSON, never as SARIF, and metadata is
-            // not a findings file. Neither must add to the count.
-            ["findings/osv.sarif"] = Fixtures.TrivySarifV2,
+            ["findings/checkov_docker.sarif"] = Fixtures.CheckovDockerSarifV2,   // 1 infra
+            // Not a findings file — must not add to the count.
             ["metadata.json"] = "{}",
         };
 
@@ -130,7 +127,7 @@ public class NormalizationPipelineTests
             // CKV_AWS_20 arrives with CWE-284 already on its rule tags; CKV_DOCKER_2 arrives
             // with nothing, which is exactly the gap rule_mappings exists to close.
             ["findings/checkov_infra.sarif"] = Fixtures.CheckovSarifV1,
-            ["findings/checkov_docker.sarif"] = SingleCheckovResult,   // CKV_DOCKER_3, no CWE
+            ["findings/checkov_docker.sarif"] = Fixtures.CheckovDockerSarifV2,   // CKV_DOCKER_3, no CWE
             ["findings/trivy.sarif"] = Fixtures.TrivySarifV2,          // AVD-AWS-0089, no CWE
         };
 
@@ -162,32 +159,4 @@ public class NormalizationPipelineTests
 
     private static Finding Single(IReadOnlyList<Finding> findings, string tool, string checkId)
         => Assert.Single(findings.Where(f => f.SourceTool == tool && f.CheckId == checkId));
-
-    // A one-result Checkov SARIF v2, so the two Checkov files in the pipeline contribute a
-    // distinct number of findings (2 + 1) rather than the same fixture twice.
-    private const string SingleCheckovResult = """
-    {
-      "version": "2.1.0",
-      "runs": [
-        {
-          "tool": { "driver": { "name": "Checkov", "rules": [] } },
-          "results": [
-            { "ruleId": "CKV_DOCKER_3", "level": "warning", "message": { "text": "Image runs as root." } }
-          ]
-        }
-      ]
-    }
-    """;
-
-    private sealed class StubBundleStore : Dictionary<string, string>, IBundleStore
-    {
-        public Task<IReadOnlyList<StoredBundleFile>> OpenFindingsAsync(string locator, CancellationToken ct)
-            => Task.FromResult<IReadOnlyList<StoredBundleFile>>(
-                this.Select(kv => new StoredBundleFile(kv.Key, Encoding.UTF8.GetBytes(kv.Value))).ToList());
-
-        public Task<string> SaveAsync(Guid scanJobId, Stream bundle, CancellationToken ct)
-            => throw new NotSupportedException();
-
-        public Task PurgeAsync(Guid scanJobId, CancellationToken ct) => throw new NotSupportedException();
-    }
 }

@@ -112,6 +112,63 @@ internal static class Fixtures
     }
     """;
 
+    // Checkov against the Dockerfile — SARIF v2, one result, so the two Checkov files in a
+    // bundle contribute a distinct number of findings rather than the same sample twice.
+    public const string CheckovDockerSarifV2 = """
+    {
+      "version": "2.1.0",
+      "runs": [
+        {
+          "tool": { "driver": { "name": "Checkov", "rules": [] } },
+          "results": [
+            {
+              "ruleId": "CKV_DOCKER_3", "level": "warning",
+              "message": { "text": "Image runs as root." },
+              "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "Dockerfile" }, "region": { "startLine": 3 } } }]
+            }
+          ]
+        }
+      ]
+    }
+    """;
+
+    // OSV-Scanner — SARIF. This is the shape the runner actually writes (scripts/run-scanners.sh
+    // emits --format sarif), and the shape the pipeline used to route out entirely. Two things
+    // it carries that the "SARIF drops the linking ids" warning claimed it would not: the CVE
+    // is the ruleId, and the package coordinate is stated in the message.
+    public const string OsvSarifV2 = """
+    {
+      "version": "2.1.0",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "osv-scanner",
+              "rules": [
+                { "id": "CVE-2024-21907", "shortDescription": { "text": "CVE-2024-21907: Improper handling in Newtonsoft.Json" } },
+                { "id": "GHSA-2cmq-823j-5qj8", "shortDescription": { "text": "Out-of-bounds write in SixLabors ImageSharp" } }
+              ]
+            }
+          },
+          "results": [
+            {
+              "ruleId": "CVE-2024-21907",
+              "level": "warning",
+              "message": { "text": "Package 'Newtonsoft.Json@9.0.1' is vulnerable to 'CVE-2024-21907' (also known as 'GHSA-5crp-9r3c-p9vr')." },
+              "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "file:///home/runner/work/repo/repo/src/OrderApp/packages.lock.json" } } }]
+            },
+            {
+              "ruleId": "GHSA-2cmq-823j-5qj8",
+              "level": "error",
+              "message": { "text": "Package 'SixLabors.ImageSharp@1.0.4' is vulnerable to 'GHSA-2cmq-823j-5qj8'." },
+              "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "file:///home/runner/work/repo/repo/src/OrderApp/packages.lock.json" } } }]
+            }
+          ]
+        }
+      ]
+    }
+    """;
+
     // OSV-Scanner — native JSON. First vuln resolves a CVE from its aliases; second is GHSA-only.
     public const string OsvNativeJson = """
     {

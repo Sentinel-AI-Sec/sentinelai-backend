@@ -28,13 +28,17 @@ public sealed class NormalizationPipeline(
     FindingUnifier unifier,
     ILogger<NormalizationPipeline> logger)
 {
-    // How a findings file name maps to a tool: its prefix, and the extension that tool emits.
-    // The extension is what keeps osv.sarif (which we deliberately do not read) from reaching
-    // the JSON extractor, and only osv.json through.
+    // How a findings file name maps to a tool: its prefix, and the extensions that tool emits.
+    //
+    // OSV is listed twice on purpose. The runner writes osv.sarif and nothing writes osv.json,
+    // so accepting only .json meant every OSV finding was dropped here — silently, because an
+    // unroutable file was a debug-level event. Both are accepted now and one extractor reads
+    // either shape.
     private static readonly (string Prefix, string Extension, string Tool)[] Routes =
     [
         ("roslyn", ".sarif", ScannerNames.Roslyn),
         ("osv", ".json", ScannerNames.Osv),
+        ("osv", ".sarif", ScannerNames.Osv),
         ("trivy", ".sarif", ScannerNames.Trivy),
         ("checkov", ".sarif", ScannerNames.Checkov),
     ];
@@ -53,7 +57,12 @@ public sealed class NormalizationPipeline(
             var extractor = ResolveExtractor(file.Name);
             if (extractor is null)
             {
-                logger.LogDebug("No extractor for findings file {File} — skipping", file.Name);
+                // Warning, not debug: a file sitting in the bundle that nothing can read is a
+                // whole scanner's findings going missing. That is how the osv.sarif/osv.json
+                // mismatch stayed invisible — it looked exactly like a clean scan.
+                logger.LogWarning(
+                    "No extractor matched findings file {File} — its findings are not in this scan",
+                    file.Name);
                 continue;
             }
 

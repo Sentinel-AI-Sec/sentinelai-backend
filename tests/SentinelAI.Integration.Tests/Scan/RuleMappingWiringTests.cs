@@ -59,9 +59,16 @@ public class RuleMappingWiringTests : IClassFixture<ScanApiFactory>
 
         var mappings = db.RuleMappings.AsNoTracking().ToList();
 
-        Assert.Equal(13, mappings.Count);
-        Assert.Contains(mappings, m => m is { SourceTool: "checkov", CheckId: "CKV_AWS_20", CweId: "CWE-284" });
-        Assert.Contains(mappings, m => m is { SourceTool: "trivy", CheckId: "AVD-AWS-0089", CweId: "CWE-778" });
+        // Deliberately not an exact count: the seed grows whenever a scanner's rule reaches the
+        // pipeline unmapped, and a hardcoded total turns every such addition into a failing
+        // test that gets bumped without being read. The invariants below are what matter.
+        Assert.NotEmpty(mappings);
+
+        // Named rows, one per tool, each keyed exactly as the scanner emits it. The Trivy one
+        // has no "AVD-" prefix on purpose — that prefix appears in Trivy's documentation but
+        // never in its SARIF, and seeding it produced a row that could not match.
+        Assert.Contains(mappings, m => m is { SourceTool: "checkov", CheckId: "CKV_AWS_53", CweId: "CWE-284" });
+        Assert.Contains(mappings, m => m is { SourceTool: "trivy", CheckId: "AWS-0089", CweId: "CWE-778" });
         Assert.Contains(mappings, m => m is { SourceTool: "roslyn", CheckId: "SCS0028", CweId: "CWE-502" });
 
         // Every seeded row must actually resolve to something, or it is dead weight in a table
@@ -83,9 +90,9 @@ public class RuleMappingWiringTests : IClassFixture<ScanApiFactory>
 
         var findings = new List<Finding>
         {
-            Unlinked(ScannerNames.Checkov, "CKV_AWS_20"),     // seeded  → CWE-284
-            Unlinked(ScannerNames.Trivy, "AVD-AWS-0089"),     // seeded  → CWE-778
-            Unlinked(ScannerNames.Checkov, "CKV_DOCKER_2"),   // no row  → stays null
+            Unlinked(ScannerNames.Checkov, "CKV_AWS_53"),     // seeded  → CWE-284
+            Unlinked(ScannerNames.Trivy, "AWS-0089"),         // seeded  → CWE-778
+            Unlinked(ScannerNames.Checkov, "CKV_AWS_1"),      // no row  → stays null
             new()
             {
                 Id = Guid.CreateVersion7(),

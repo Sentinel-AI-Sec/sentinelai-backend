@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
@@ -6,12 +7,31 @@ using SentinelAI.Domain.Models;
 namespace SentinelAI.Infrastructure.Normalization;
 
 /// <summary>
-/// Normalizes OSV-Scanner's <em>native</em> JSON (not its SARIF). OSV reports the dependency
-/// layer, and its native output keeps the CVE and GHSA ids — a finding's linking keys — that
-/// the SARIF export flattens away. Reading the native shape is the whole reason this extractor
-/// is JSON rather than SARIF.
+/// Normalizes OSV-Scanner output, in either shape it emits: its native JSON, or its SARIF.
+/// Every OSV finding is a dependency vulnerability, so all of them are <see cref="Layer.Dep"/>.
 /// </summary>
-public sealed class OsvJsonExtractor : IFindingExtractor
+/// <remarks>
+/// <para>
+/// One extractor for both shapes because <c>osv.sarif</c> and <c>osv.json</c> are both JSON and
+/// the difference is one property at the root — the same tolerance <see cref="SarifReader"/>
+/// applies across SARIF v1 and v2, applied one level up.
+/// </para>
+/// <para>
+/// <b>Why it reads SARIF at all.</b> This extractor originally accepted only the native JSON,
+/// on the stated grounds that OSV's SARIF export "drops the CVE/GHSA linking ids". That is true
+/// of Dependency-Check, which OSV-Scanner replaced and which is no longer in the toolchain; it
+/// is <em>not</em> true of OSV-Scanner, whose SARIF puts the CVE in <c>ruleId</c> and the
+/// package coordinate in the message. Meanwhile <c>scripts/run-scanners.sh</c> writes
+/// <c>osv.sarif</c> and nothing anywhere writes <c>osv.json</c> — so the whole dependency layer
+/// from OSV was being discarded at <c>LogDebug</c> to avoid a data loss that does not occur.
+/// </para>
+/// <para>
+/// The native shape is still preferred where a runner produces it: it states the package name
+/// and version as fields rather than inside prose, and carries CWEs in
+/// <c>database_specific</c>.
+/// </para>
+/// </remarks>
+public sealed partial class OsvExtractor : IFindingExtractor
 {
     public string SourceTool => ScannerNames.Osv;
 
@@ -32,8 +52,14 @@ public sealed class OsvJsonExtractor : IFindingExtractor
             var findings = new List<Finding>();
             var root = doc.RootElement;
 
-            if (root.ValueKind != JsonValueKind.Object ||
-                !root.TryGetProperty("results", out var results) ||
+            if (root.ValueKind != JsonValueKind.Object)
+                return findings;
+
+            // A "runs" array is what makes it SARIF; the native shape has "results" at the root.
+            if (root.TryGetProperty("runs", out _))
+                return FromSarif(root, tenantId, scanJobId);
+
+            if (!root.TryGetProperty("results", out var results) ||
                 results.ValueKind != JsonValueKind.Array)
             {
                 return findings;
@@ -71,6 +97,48 @@ public sealed class OsvJsonExtractor : IFindingExtractor
             return findings;
         }
     }
+
+    /// <summary>
+    /// The SARIF shape. Every result is one advisory against one package; OSV puts the CVE in
+    /// <c>ruleId</c> and states the package in the message as
+    /// <c>Package 'Name@Version' is vulnerable to 'CVE-…'</c>.
+    /// </summary>
+    /// <remarks>
+    /// The package is parsed out of the message because it is the only place the SARIF carries
+    /// it — the physical location points at the lock file. Without it every OSV finding would
+    /// decorate one <c>packages.lock.json</c> node and none would meet Trivy's findings about
+    /// the same package (SEC-16). A message OSV words differently yields a null coordinate and
+    /// falls back to the lock-file path, which is a coarser node, not a wrong one.
+    /// </remarks>
+    private List<Finding> FromSarif(JsonElement root, Guid tenantId, Guid scanJobId)
+    {
+        var findings = new List<Finding>();
+
+        foreach (var result in SarifReader.Read(root))
+        {
+            var finding = SarifFindings.From(result, SourceTool, Layer.Dep, tenantId, scanJobId);
+
+            // OSV's SARIF ruleId *is* the advisory id, so it serves as both the linking key and
+            // the rule id a rule_mappings row would key on.
+            finding.CveId ??= result.RuleId;
+
+            if (PackageCoordinate(result.Message) is { } coordinate)
+                finding.Location = coordinate;
+
+            findings.Add(finding);
+        }
+
+        return findings;
+    }
+
+    private static string? PackageCoordinate(string message)
+    {
+        var match = PackageInMessage().Match(message);
+        return match.Success ? match.Groups["pkg"].Value.Trim() : null;
+    }
+
+    [GeneratedRegex(@"Package\s+'(?<pkg>[^']+)'\s+is\s+vulnerable", RegexOptions.IgnoreCase)]
+    private static partial Regex PackageInMessage();
 
     /// <summary>
     /// The package coordinate as <c>name@version</c>, from OSV's <c>package</c> block.

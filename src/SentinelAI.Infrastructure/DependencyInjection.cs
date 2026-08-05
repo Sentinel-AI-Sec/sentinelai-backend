@@ -35,7 +35,7 @@ public static class DependencyInjection
         // One extractor per tool, all resolved together as IEnumerable<IFindingExtractor> by
         // the NormalizationPipeline.
         services.AddScoped<IFindingExtractor, RoslynSarifExtractor>();
-        services.AddScoped<IFindingExtractor, OsvJsonExtractor>();
+        services.AddScoped<IFindingExtractor, OsvExtractor>();
         services.AddScoped<IFindingExtractor, TrivySarifExtractor>();
         services.AddScoped<IFindingExtractor, CheckovSarifExtractor>();
 

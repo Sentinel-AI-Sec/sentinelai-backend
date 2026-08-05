@@ -44,32 +44,41 @@ internal static class SarifReader
 
         using (doc)
         {
-            var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object ||
-                !root.TryGetProperty("runs", out var runs) ||
-                runs.ValueKind != JsonValueKind.Array)
-            {
-                // A SARIF file with no runs is empty, not broken — nothing to normalize.
-                return [];
-            }
-
-            var results = new List<SarifResult>();
-            foreach (var run in runs.EnumerateArray())
-            {
-                var rules = BuildRuleIndex(run);
-
-                if (!run.TryGetProperty("results", out var runResults) ||
-                    runResults.ValueKind != JsonValueKind.Array)
-                {
-                    continue;
-                }
-
-                foreach (var result in runResults.EnumerateArray())
-                    results.Add(Flatten(result, rules));
-            }
-
-            return results;
+            return Read(doc.RootElement);
         }
+    }
+
+    /// <summary>
+    /// The same walk over an already-parsed document, for a caller that had to inspect the root
+    /// before it knew the file was SARIF — <see cref="OsvExtractor"/> reads either OSV shape and
+    /// tells them apart by the presence of <c>runs</c>, so it cannot re-read the stream.
+    /// </summary>
+    public static IReadOnlyList<SarifResult> Read(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("runs", out var runs) ||
+            runs.ValueKind != JsonValueKind.Array)
+        {
+            // A SARIF file with no runs is empty, not broken — nothing to normalize.
+            return [];
+        }
+
+        var results = new List<SarifResult>();
+        foreach (var run in runs.EnumerateArray())
+        {
+            var rules = BuildRuleIndex(run);
+
+            if (!run.TryGetProperty("results", out var runResults) ||
+                runResults.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var result in runResults.EnumerateArray())
+                results.Add(Flatten(result, rules));
+        }
+
+        return results;
     }
 
     /// <summary>
