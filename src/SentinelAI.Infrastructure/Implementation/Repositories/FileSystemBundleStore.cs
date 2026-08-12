@@ -35,7 +35,17 @@ public sealed class FileSystemBundleStore(
     /// <summary>The findings the scanners produced live under this prefix inside the bundle.</summary>
     private const string FindingsPrefix = "findings/";
 
-    public async Task<IReadOnlyList<StoredBundleFile>> OpenFindingsAsync(string locator, CancellationToken ct)
+    /// <summary>The Terraform DOT graph and raw .tf sources live under this prefix (SEC-17).</summary>
+    private const string GraphInputsPrefix = "graph-inputs/";
+
+    public Task<IReadOnlyList<StoredBundleFile>> OpenFindingsAsync(string locator, CancellationToken ct) =>
+        OpenByPrefixAsync(locator, FindingsPrefix, "findings", ct);
+
+    public Task<IReadOnlyList<StoredBundleFile>> OpenGraphInputsAsync(string locator, CancellationToken ct) =>
+        OpenByPrefixAsync(locator, GraphInputsPrefix, "graph-inputs", ct);
+
+    private async Task<IReadOnlyList<StoredBundleFile>> OpenByPrefixAsync(
+        string locator, string prefix, string kindForLog, CancellationToken ct)
     {
         // The locator is the path SaveAsync returned — the job's bundle.tar.gz.
         if (!File.Exists(locator))
@@ -44,7 +54,7 @@ public sealed class FileSystemBundleStore(
             return [];
         }
 
-        var findings = new List<StoredBundleFile>();
+        var matched = new List<StoredBundleFile>();
 
         await using var file = File.OpenRead(locator);
         await using var gzip = new GZipStream(file, CompressionMode.Decompress);
@@ -56,16 +66,16 @@ public sealed class FileSystemBundleStore(
                 continue;
 
             var name = Normalize(entry.Name);
-            if (!name.StartsWith(FindingsPrefix, StringComparison.OrdinalIgnoreCase) || entry.DataStream is null)
+            if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || entry.DataStream is null)
                 continue;
 
             using var buffer = new MemoryStream();
             await entry.DataStream.CopyToAsync(buffer, ct);
-            findings.Add(new StoredBundleFile(name, buffer.ToArray()));
+            matched.Add(new StoredBundleFile(name, buffer.ToArray()));
         }
 
-        logger.LogInformation("Opened {Count} findings file(s) from {Locator}", findings.Count, locator);
-        return findings;
+        logger.LogInformation("Opened {Count} {Kind} file(s) from {Locator}", matched.Count, kindForLog, locator);
+        return matched;
     }
 
     /// <summary>Tar writes a leading <c>./</c>; strip it so the prefix check is like-for-like.</summary>

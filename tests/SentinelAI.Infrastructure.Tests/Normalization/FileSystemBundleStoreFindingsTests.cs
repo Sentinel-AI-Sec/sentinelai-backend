@@ -62,6 +62,40 @@ public class FileSystemBundleStoreFindingsTests
         Assert.Empty(files);
     }
 
+    [Fact]
+    public async Task Returns_only_the_graph_input_files_from_the_stored_tarball()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "sentinelai-tests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(dir);
+        var locator = Path.Combine(dir, "bundle.tar.gz");
+
+        try
+        {
+            await WriteTarGz(locator, new Dictionary<string, string>
+            {
+                ["graph-inputs/terraform-graph.dot"] = "digraph G {}",
+                ["graph-inputs/infra/main.tf"] = "resource \"aws_s3_bucket\" \"x\" {}",
+                ["findings/roslyn.sarif"] = "{\"runs\":[]}",  // excluded
+                ["metadata.json"] = "{}",                     // excluded
+            });
+
+            var store = new FileSystemBundleStore(
+                Options.Create(new BundleStorageOptions()), NullLogger<FileSystemBundleStore>.Instance);
+
+            var files = await store.OpenGraphInputsAsync(locator, CancellationToken.None);
+
+            Assert.Equal(2, files.Count);
+            Assert.Contains(files, f => f.Name == "graph-inputs/terraform-graph.dot");
+            Assert.Contains(files, f => f.Name == "graph-inputs/infra/main.tf");
+            Assert.DoesNotContain(files, f => f.Name.StartsWith("findings"));
+            Assert.DoesNotContain(files, f => f.Name == "metadata.json");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     private static async Task WriteTarGz(string path, Dictionary<string, string> entries)
     {
         await using var file = File.Create(path);

@@ -26,6 +26,13 @@ public interface IBundleStore
     /// </remarks>
     Task<IReadOnlyList<StoredBundleFile>> OpenFindingsAsync(string locator, CancellationToken ct);
 
+    /// <summary>
+    /// Reads back the bundle's <c>graph-inputs/</c> files (the Terraform DOT graph and raw
+    /// <c>.tf</c> sources) for the infra-spine stage (SEC-17), given the locator
+    /// <see cref="SaveAsync"/> returned.
+    /// </summary>
+    Task<IReadOnlyList<StoredBundleFile>> OpenGraphInputsAsync(string locator, CancellationToken ct);
+
     /// <summary>Deletes everything held for a job. Idempotent.</summary>
     Task PurgeAsync(Guid scanJobId, CancellationToken ct);
 }

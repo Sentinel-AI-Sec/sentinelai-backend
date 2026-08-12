@@ -6,6 +6,7 @@ using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
 using SentinelAI.Infrastructure.Agents;
 using SentinelAI.Infrastructure.Data;
+using SentinelAI.Infrastructure.Graph;
 using SentinelAI.Infrastructure.Knowledge;
 using SentinelAI.Infrastructure.Implementation;
 using SentinelAI.Infrastructure.Implementation.Repositories;
@@ -42,6 +43,14 @@ public static class DependencyInjection
 
         // ---- SEC-15: rule-mapping resolution (exact SQL lookup) --------------------------
         services.AddScoped<IRuleMappingLookup, SqlRuleMappingLookup>();
+
+        // ---- SEC-17: infra spine from the Terraform graph ---------------------------------
+        services.AddScoped<IInfraSpineReader, TerraformInfraSpineReader>();
+
+        // ---- SEC-18/19: dep-code, role-resource, and code-infra seams ---------------------
+        services.AddScoped<IDepCodeSeamReader, DepCodeSeamReader>();
+        services.AddScoped<IRoleResourceSeamReader, RoleResourceSeamReader>();
+        services.AddScoped<ICodeInfraSeamReader, CodeInfraSeamReader>();
 
         // ---- SEC-45: knowledge retrieval -------------------------------------------------
         // A canned-answer stub so the walking skeleton can cross the retrieval seam before the
