@@ -52,6 +52,9 @@ public static class DependencyInjection
         services.AddScoped<IRoleResourceSeamReader, RoleResourceSeamReader>();
         services.AddScoped<ICodeInfraSeamReader, CodeInfraSeamReader>();
 
+        // ---- SEC-20: placing infra findings on the resource they are about ----------------
+        services.AddScoped<IInfraFindingLocator, TerraformFindingLocator>();
+
         // ---- SEC-45: knowledge retrieval -------------------------------------------------
         // A canned-answer stub so the walking skeleton can cross the retrieval seam before the
         // corpus exists. It logs a warning on every call. Replacing it with the Qdrant

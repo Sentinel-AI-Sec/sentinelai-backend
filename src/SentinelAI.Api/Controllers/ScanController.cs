@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SentinelAI.Application.Features.Scan.Commands.Purge;
+using SentinelAI.Application.Features.Scan.Commands.RunGraph;
 using SentinelAI.Application.Features.Scan.Commands.Submit;
 using SentinelAI.Application.Features.Scan.Queries.GetById;
 using SentinelAI.Domain.Models;
@@ -45,6 +46,24 @@ public class ScanController(ISender sender) : ControllerBase
     public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
     {
         var response = await sender.Send(new GetScanJobQuery(id), ct);
+        return StatusCode((int)response.StatusCode, response);
+    }
+
+    /// <summary>
+    /// Runs the normalize → graph → candidate-chain stages over an already-ingested bundle and
+    /// returns the chains (SEC-14…SEC-20).
+    /// </summary>
+    /// <remarks>
+    /// Synchronous and manually triggered, like <c>POST /v1/debates/demo</c>: no queue-driven
+    /// worker exists yet, so this is how the pipeline is exercised end to end through the API
+    /// without a GitHub Action run. It is fast — parsing and graph traversal, no model calls —
+    /// so blocking the request is fine here in a way it would not be for the debate.
+    /// Requires <c>scan:write</c>: it writes graph, node and chain rows.
+    /// </remarks>
+    [HttpPost("{id:guid}/graph")]
+    public async Task<IActionResult> RunGraphStage(Guid id, CancellationToken ct)
+    {
+        var response = await sender.Send(new RunGraphStageCommand(id), ct);
         return StatusCode((int)response.StatusCode, response);
     }
 

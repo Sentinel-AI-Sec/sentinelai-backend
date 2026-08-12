@@ -96,7 +96,18 @@ internal sealed class FakeGenericRepository<T> : IGenericRepository<T> where T :
     public IQueryable<T> GetTableAsTracked() => throw new NotSupportedException();
     public IQueryable<T> GetTableAsNotTracked() => throw new NotSupportedException();
     public Task AddRangeAsync(ICollection<T> entities) => throw new NotSupportedException();
-    public Task UpdateAsync(T entity) => throw new NotSupportedException();
+
+    // CandidateChainWriter (SEC-20) marks the hot nodes it decorated. The real repository is
+    // writing a change to an already-tracked entity, so recording the call is all a fake owes
+    // it — the entity itself was mutated in place and Added already holds it.
+    public List<T> Updated { get; } = [];
+
+    public Task UpdateAsync(T entity)
+    {
+        Updated.Add(entity);
+        return Task.CompletedTask;
+    }
+
     public Task UpdateRangeAsync(ICollection<T> entities) => throw new NotSupportedException();
     public Task DeleteAsync(T entity) => throw new NotSupportedException();
     public Task DeleteRangeAsync(ICollection<T> entities) => throw new NotSupportedException();

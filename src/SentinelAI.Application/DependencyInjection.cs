@@ -40,6 +40,18 @@ public static class DependencyInjection
         services.AddScoped<Features.Scan.Graph.RoleResourceSeamWriter>();
         services.AddScoped<Features.Scan.Graph.CodeInfraSeamWriter>();
 
+        // SEC-20: bounded candidate-chain generation over the graph those seams built. The
+        // decorator and the traverser are pure; the writer owns the database and the bundle,
+        // and takes its IInfraFindingLocator from Infrastructure.
+        services.AddScoped<Features.Scan.Graph.GraphDecorator>();
+        services.AddScoped<Features.Scan.Graph.ExploitChainTraverser>();
+        services.AddScoped<Features.Scan.Graph.CandidateChainWriter>();
+
+        // The graph stage as one callable unit — the four seam writers plus SEC-20 over one
+        // ingested bundle. POST /v1/scans/{id}/graph is its only caller today; a queue-driven
+        // worker takes it over when one exists.
+        services.AddScoped<Features.Scan.Graph.GraphStagePipeline>();
+
         // SEC-45: the walking skeleton. Every stage below is pure except the two ports it
         // composes — IKnowledgeRetriever and IDebateEngine — which Infrastructure supplies.
         services.AddScoped<Features.Scan.Graph.GraphSeeder>();

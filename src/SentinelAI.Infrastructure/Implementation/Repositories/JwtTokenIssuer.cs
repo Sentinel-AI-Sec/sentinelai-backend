@@ -42,6 +42,12 @@ public sealed class JwtTokenIssuer(IConfiguration configuration) : IJwtTokenIssu
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
 
+        // One space-delimited OAuth "scope" claim, which HttpCallerContext splits. Without it
+        // every HasScope check fails for every human user — see RoleScopes for how that went
+        // unnoticed. Machine tokens are issued elsewhere and carry their own scopes.
+        if (RoleScopes.ClaimValue(user.Role) is { } scopes)
+            claims.Add(new Claim("scope", scopes));
+
         var token = new JwtSecurityToken(
             issuer: _jwt["Issuer"],
             audience: _jwt["Audience"],
