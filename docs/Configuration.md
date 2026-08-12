@@ -42,11 +42,60 @@ The agents are real `ChatClientAgent`s in every configuration. Only the backing
 | `Scripted` | — | **Default.** Deterministic offline responses. Every test runs here: no key, no network, no spend. |
 | `Nim` | `https://integrate.api.nvidia.com/v1` | NVIDIA NIM. OpenAI-wire-compatible, so it reuses the OpenAI client. |
 | `Anthropic` | `https://api.anthropic.com/v1` | For when Claude access lands. |
-| `AzureOpenAI` | **must be set explicitly** | The AID-01 production target. |
+| `AzureOpenAI` | **must be set explicitly** | The AID-01 production target. See §1.1 — it does not behave like the others. |
 
 Every live provider **fails loud** on a missing key rather than falling back to `Scripted`.
 A silent fallback would produce runs that look successful and mean nothing — the same class
 of bug as the silent embedding fallback AID-01 §5 exists to prevent.
+
+Since SEC-30 this is checked **at startup**, not at the first model call. A live provider
+with a missing key or (for Azure) a missing endpoint refuses to boot, naming the agents that
+lack one. Previously the API accepted a scan, stored the bundle and queued the job before
+discovering the problem inside a debate turn.
+
+### 1.1 Azure OpenAI
+
+Azure speaks the OpenAI *format* but not the OpenAI *protocol*, and gets its own client for
+three reasons — each of which produces a 401 or 404 rather than a useful error if ignored:
+
+| | OpenAI-compatible (`Nim`, `Anthropic`) | `AzureOpenAI` |
+|---|---|---|
+| Auth | `Authorization: Bearer <key>` | `api-key: <key>` |
+| Model | sent in the request body | a **deployment name** in the URL path |
+| Version | — | `api-version` query parameter, required |
+
+The practical consequence: under Azure, **`HighTierModel` and `CheapTierModel` are deployment
+names, not model names.** Azure has no way to ask for `gpt-4o` by name — you create a
+deployment, choose its name, and address that. The defaults (`gpt-4o`, `gpt-4o-mini`) assume
+you named the deployment after the model it serves, which is the usual convention. If yours
+is called something else, set these to the deployment names.
+
+```jsonc
+{
+  "SentinelAI": {
+    "Models": {
+      "Provider": "AzureOpenAI",
+
+      // Your resource URL. No default is possible — the host is your resource name.
+      "Endpoint": "https://my-resource.openai.azure.com",
+
+      // Deployment names, not model names.
+      "HighTierModel": "gpt-4o",
+      "CheapTierModel": "gpt-4o-mini",
+
+      "Agents": {
+        "Orchestrator": { "ApiKey": "" },
+        "Red":          { "ApiKey": "" },
+        "Blue":         { "ApiKey": "" },
+        "Reporter":     { "ApiKey": "" }
+      }
+    }
+  }
+}
+```
+
+A per-agent `Model` is also a deployment name here, which is how one role can be pinned to a
+separately-quota'd deployment.
 
 ---
 

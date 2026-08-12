@@ -28,6 +28,11 @@ public static class AgentsDependencyInjection
         // path that actually matters — did not.
         var models = ModelOptionsLoader.Load(configuration);
 
+        // SEC-30: a live provider with no key is a boot-time failure, not a first-debate one.
+        // The API used to accept the scan, store the bundle and queue the job before finding
+        // out — the demo checked, the path that matters did not.
+        ProviderReadiness.Verify(models, DebateWorkflow.ModelBackedRoles);
+
         // Turn-cap, model tiers, token budget.
         services.Configure<DebateOptions>(configuration.GetSection(DebateOptions.SectionName));
 
