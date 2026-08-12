@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.Extensions.Logging;
+using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
 using SentinelAI.Domain.Models;
 
@@ -26,6 +27,7 @@ namespace SentinelAI.Application.Features.Scan.Graph;
 /// </para>
 /// </remarks>
 public sealed class GraphStagePipeline(
+    IUnitOfWork unitOfWork,
     IBundleStore bundleStore,
     InfraSpineWriter infraSpine,
     DepCodeSeamWriter depCode,
@@ -51,6 +53,10 @@ public sealed class GraphStagePipeline(
                 "Bundle for scan job {ScanJobId} carries no Terraform and no lock files; there are "
                 + "no edges to build and therefore no chains to find", scanJobId);
         }
+
+        // 0. Whatever a previous run of this job left behind. See ClearPreviousGraphAsync — the
+        //    seam writers are additive, so without this the stage builds on top of itself.
+        await ClearPreviousGraphAsync(scanJobId);
 
         // 1. The infra spine (SEC-17). Reads the bundle itself — it is the one writer that needs
         //    the DOT graph, which nothing else looks at.
@@ -85,6 +91,46 @@ public sealed class GraphStagePipeline(
 
         return new GraphStageResult(
             inputs.HclFiles.Count, inputs.LockFiles.Count, inputs.Dockerfiles.Count, chains);
+    }
+
+    /// <summary>
+    /// Drops the job's existing graph so this run rebuilds it rather than adding to it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Nodes are upserted on (<c>scan_job_id</c>, <c>node_key</c>) and survive a second run
+    /// unchanged, but edges are not: <c>SeamPersistence.UpsertEdgeAsync</c> inserts
+    /// unconditionally, so running the stage twice gave every edge a twin. The traverser then
+    /// walked each join two ways and produced the same path repeatedly until it hit its candidate
+    /// cap — 32 real chains became 200 identical-looking ones, with no error anywhere. That never
+    /// showed up before because nothing could run the stage twice; the manual trigger can.
+    /// </para>
+    /// <para>
+    /// Deleting rather than de-duplicating is the honest version of what a re-run means: the
+    /// bundle is the source of truth, and a node or edge the current bundle no longer implies has
+    /// no business surviving into this scan's graph. The chain rows that referenced these edges
+    /// are already gone — <c>NormalizedFindingWriter</c> clears them before this stage runs,
+    /// because the same re-run has to replace the findings the hops point at.
+    /// </para>
+    /// </remarks>
+    private async Task ClearPreviousGraphAsync(Guid scanJobId)
+    {
+        var edges = (await unitOfWork.Repository<GraphEdge>()
+            .GetWhereAsync(e => e.ScanJobId == scanJobId)).ToList();
+
+        var nodes = (await unitOfWork.Repository<GraphNode>()
+            .GetWhereAsync(n => n.ScanJobId == scanJobId)).ToList();
+
+        if (edges.Count == 0 && nodes.Count == 0) return;
+
+        if (edges.Count > 0) await unitOfWork.Repository<GraphEdge>().DeleteRangeAsync(edges);
+        if (nodes.Count > 0) await unitOfWork.Repository<GraphNode>().DeleteRangeAsync(nodes);
+
+        await unitOfWork.CompleteAsync();
+
+        logger.LogInformation(
+            "Cleared {Nodes} node(s) and {Edges} edge(s) from a previous graph run of scan job {ScanJobId}",
+            nodes.Count, edges.Count, scanJobId);
     }
 
     /// <summary>

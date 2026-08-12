@@ -31,4 +31,6 @@ public class UnitOfWork(
     }
  
     public Task<int> CompleteAsync() => context.SaveChangesAsync();
+
+    public void DiscardChanges() => context.ChangeTracker.Clear();
 }

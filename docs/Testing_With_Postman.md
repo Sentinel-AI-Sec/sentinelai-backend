@@ -30,7 +30,15 @@ already ships that output in `scan_out/`, so locally the whole thing reduces to 
 for you.
 
 The token must carry the **`scan:write`** scope: ingest needs it, and so does the graph stage,
-which writes node, edge and chain rows.
+which writes node, edge and chain rows. You do not ask for it — the issuer derives the scopes
+from the user's role (`RoleScopes`), so an `admin` or `analyst` gets `scan:write scan:read
+report:read` and a `viewer` gets the two read scopes. The login response echoes them in
+`data.scopes` so you can see what a token can do without decoding it.
+
+> If a scan endpoint answers `403 token is missing the 'scan:write' scope` with a freshly issued
+> token, decode it at [jwt.io](https://jwt.io) and look for the `scope` claim. Missing entirely
+> means the issuer stopped emitting it — that was a real bug, and
+> `AuthEndpointTests.The_token_register_issues_carries_the_scopes_its_role_implies` guards it now.
 
 ## 2. Have a project to scan
 
@@ -95,18 +103,28 @@ It exists because **no queue-driven worker does this yet**. When one lands it ca
 `GraphStagePipeline` and this endpoint becomes redundant. Same reasoning as
 `POST /v1/debates/demo`.
 
+**Re-running it is safe and is the normal way to iterate.** Each run replaces the job's previous
+output rather than adding to it: the findings, chains, hops and citations from the last run are
+deleted, and the graph is rebuilt from scratch. So you can edit the fixture, rebuild the bundle,
+and re-post without the numbers drifting upward. (Nodes were always idempotent; edges were not,
+and a second run used to double every one of them — which showed up as the chain count jumping
+to the traverser's 200-candidate cap rather than as an error.)
+
 ### What a good response looks like
 
 ```jsonc
 {
   "isSuccess": true,
   "data": {
-    "findings": 47,
+    // The committed fixture produces exactly these, run after run.
+    "findings": 85,
     "terraformFiles": 5, "lockFiles": 1, "dockerfiles": 1,
-    "candidateChains": 6,
+    "candidateChains": 32,
     "chains": [
+      // Not the first one returned — ranking puts the shorter paths to the two crown-jewel
+      // buckets ahead of it. This is the flagship chain, the one the fixture exists to produce.
       {
-        "priority": 1,
+        "priority": 8,
         "hopCount": 4,
         "minConfidence": "Inferred",
         "maxSeverity": 4,
@@ -159,6 +177,8 @@ left silently at its old stage.
 | `409` on the graph stage | The job has no stored bundle. |
 | `410` on the graph stage | The bundle was purged. |
 | `500` on the graph stage, `finding_id` constraint | Migrations are behind — apply `MakeChainHopFindingOptional`. |
+| `403` with a token you just logged in with | The `scope` claim is missing from the token; see step 1. |
+| An unhandled exception page instead of a JSON `500` | The stage failed *and* recording that failure failed. The handler discards the rejected changes before writing the reason, so this should not happen — if it does, the real error is the first line of the page, above the `SaveChangesAsync` stack. |
 
 ---
 

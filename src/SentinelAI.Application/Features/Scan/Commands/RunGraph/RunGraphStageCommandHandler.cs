@@ -18,6 +18,7 @@ public class RunGraphStageCommandHandler(
     IUnitOfWork unitOfWork,
     ICallerContext caller,
     NormalizationPipeline normalization,
+    NormalizedFindingWriter findingWriter,
     GraphStagePipeline graphStage,
     ILogger<RunGraphStageCommandHandler> logger)
     : IRequestHandler<RunGraphStageCommand, Response>
@@ -50,6 +51,11 @@ public class RunGraphStageCommandHandler(
         try
         {
             var findings = await normalization.NormalizeAsync(bundle.StorageLocator, tenantId, job.Id, ct);
+
+            // Before the graph, not after: a chain hop's finding_id is a foreign key, so the
+            // findings have to be rows by the time the chains are written.
+            await findingWriter.WriteAsync(findings, job.Id, ct);
+
             var result = await graphStage.RunAsync(bundle.StorageLocator, findings, tenantId, job.Id, ct);
 
             await AdvanceStageAsync(job, ScanStage.Graph, failure: null);
@@ -65,10 +71,34 @@ public class RunGraphStageCommandHandler(
             // to see the failure — but the job row is what a later reader will look at, so it
             // records the reason too rather than staying silently at its old stage.
             logger.LogError(ex, "Graph stage failed for scan job {ScanJobId}", job.Id);
-            await AdvanceStageAsync(job, job.Stage, failure: ex.Message);
+            await RecordFailureAsync(job, ex);
 
             return await Response.FailureAsync(
                 $"graph stage failed: {ex.Message}", HttpStatusCode.InternalServerError);
+        }
+    }
+
+    /// <summary>
+    /// Writes the failure onto the job without letting a second failure escape.
+    /// </summary>
+    /// <remarks>
+    /// The changes the stage had queued are dropped first. If the stage died <em>because</em> the
+    /// database rejected them — the usual case — they are still sitting in the unit of work, and
+    /// saving the status on top of them would resend the rejected batch and throw the same
+    /// exception out of the catch block, past this handler, to the caller as an unhandled error.
+    /// The wrapping catch covers the rest: the caller is owed the real reason for the failure,
+    /// which matters more than the bookkeeping succeeding.
+    /// </remarks>
+    private async Task RecordFailureAsync(ScanJob job, Exception failure)
+    {
+        try
+        {
+            unitOfWork.DiscardChanges();
+            await AdvanceStageAsync(job, job.Stage, failure.Message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Could not record the graph-stage failure on scan job {ScanJobId}", job.Id);
         }
     }
 

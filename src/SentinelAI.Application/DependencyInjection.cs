@@ -19,6 +19,7 @@ public static class DependencyInjection
 
         // SEC-14: the Normalize stage. Its IFindingExtractor set is supplied by Infrastructure.
         services.AddScoped<Features.Scan.Normalization.NormalizationPipeline>();
+        services.AddScoped<Features.Scan.Normalization.NormalizedFindingWriter>();
 
         // SEC-15: the rule-mapping step inside that stage. Its IRuleMappingLookup is the SQL
         // implementation supplied by Infrastructure.

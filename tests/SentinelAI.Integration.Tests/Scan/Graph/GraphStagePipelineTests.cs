@@ -63,6 +63,7 @@ public class GraphStagePipelineTests
         var store = new FakeGraphInputsStore { Files = files ?? BundleFiles() };
 
         var pipeline = new GraphStagePipeline(
+            unitOfWork,
             store,
             new InfraSpineWriter(
                 store,
@@ -99,6 +100,57 @@ public class GraphStagePipelineTests
         Location = "Newtonsoft.Json@12.0.1",
         Message = "CVE-2024-21907",
     };
+
+    /// <summary>
+    /// Triggering the stage twice has to produce the same graph, not twice the graph.
+    /// </summary>
+    /// <remarks>
+    /// Nodes were always safe — they upsert on (scan_job_id, node_key) — but edges insert
+    /// unconditionally, so the second run gave every join a twin and the traverser walked each one
+    /// twice. The visible symptom was a chain count that jumped to the traverser's candidate cap
+    /// with nothing logged, which reads exactly like a richer graph rather than a broken one.
+    /// </remarks>
+    [Fact]
+    public async Task Running_the_stage_twice_rebuilds_the_graph_rather_than_doubling_it()
+    {
+        var (pipeline, unitOfWork) = Build();
+        var findings = new[] { PackageFinding() };
+
+        var first = await pipeline.RunAsync(Locator, findings, Tenant, Job, CancellationToken.None);
+        var nodesAfterFirst = unitOfWork.FakeRepository<GraphNode>().Added.Count;
+        var edgesAfterFirst = unitOfWork.FakeRepository<GraphEdge>().Added.Count;
+
+        var second = await pipeline.RunAsync(Locator, findings, Tenant, Job, CancellationToken.None);
+
+        Assert.Equal(nodesAfterFirst, unitOfWork.FakeRepository<GraphNode>().Added.Count);
+        Assert.Equal(edgesAfterFirst, unitOfWork.FakeRepository<GraphEdge>().Added.Count);
+        Assert.Equal(first.Chains.Count, second.Chains.Count);
+    }
+
+    /// <summary>Another job's graph is not this job's to clear.</summary>
+    [Fact]
+    public async Task The_rebuild_only_clears_the_job_being_run()
+    {
+        var (pipeline, unitOfWork) = Build();
+        var otherJob = Guid.NewGuid();
+
+        var stranger = new GraphNode
+        {
+            Id = Guid.CreateVersion7(),
+            TenantId = Tenant,
+            ScanJobId = otherJob,
+            NodeKey = NodeId.Code("SomeoneElse"),
+            NodeType = NodeType.Code,
+            Layer = Layer.Code,
+        };
+
+        unitOfWork.FakeRepository<GraphNode>().Added.Add(stranger);
+
+        await pipeline.RunAsync(Locator, [PackageFinding()], Tenant, Job, CancellationToken.None);
+        await pipeline.RunAsync(Locator, [PackageFinding()], Tenant, Job, CancellationToken.None);
+
+        Assert.Contains(stranger, unitOfWork.FakeRepository<GraphNode>().Added);
+    }
 
     [Fact]
     public async Task Sorts_the_bundles_graph_inputs_into_the_shapes_each_seam_consumes()

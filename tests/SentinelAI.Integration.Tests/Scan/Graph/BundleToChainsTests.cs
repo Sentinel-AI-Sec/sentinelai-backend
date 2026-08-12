@@ -118,6 +118,7 @@ public class BundleToChainsTests : IDisposable
             NullLogger<FileSystemBundleStore>.Instance);
 
         var pipeline = new GraphStagePipeline(
+            unitOfWork,
             store,
             new InfraSpineWriter(
                 store,

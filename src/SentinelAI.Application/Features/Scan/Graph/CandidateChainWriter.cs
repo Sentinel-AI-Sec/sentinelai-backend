@@ -22,13 +22,17 @@ namespace SentinelAI.Application.Features.Scan.Graph;
 /// <para>
 /// Findings arrive as a parameter rather than being read back from <c>findings</c>, exactly as
 /// <see cref="ThinSlice.ThinSlicePipeline"/> takes them: normalization (SEC-14/15/16) is the
-/// stage that produces them and nothing persists them yet, so taking them as input keeps this a
-/// seam rather than a guess about storage that does not exist.
+/// stage that produces them, and the in-memory list is the richer one —
+/// <see cref="Finding.Location"/> is mapped out of the table by design, and this class needs it
+/// to place an infra finding on a Terraform resource. The rows themselves must exist by the time
+/// this runs, though, because a hop's <c>finding_id</c> is a foreign key;
+/// <see cref="Normalization.NormalizedFindingWriter"/> writes them and the stage pipeline calls
+/// it first.
 /// </para>
 /// <para>
-/// Like the seam writers before it, nothing calls this during a live scan yet — there is still
-/// no scan-job orchestration story anywhere in this codebase (see
-/// <c>docs/Walking_Skeleton.md</c> §6).
+/// <see cref="GraphStagePipeline"/> is what calls this in a real scan, behind
+/// <c>POST /v1/scans/{id}/graph</c>. There is still no automatic orchestration — the trigger is
+/// manual (see <c>docs/Walking_Skeleton.md</c> §6).
 /// </para>
 /// </remarks>
 public sealed class CandidateChainWriter(

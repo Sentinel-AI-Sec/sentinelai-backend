@@ -42,6 +42,7 @@ public class RunGraphStageCommandHandlerTests
             NullLogger<NormalizationPipeline>.Instance);
 
         var graphStage = new GraphStagePipeline(
+            unitOfWork,
             store,
             new InfraSpineWriter(store, new NoInfraSpine(), unitOfWork, NullLogger<InfraSpineWriter>.Instance),
             new DepCodeSeamWriter(new NoDepCode(), unitOfWork, NullLogger<DepCodeSeamWriter>.Instance),
@@ -54,8 +55,12 @@ public class RunGraphStageCommandHandlerTests
                 unitOfWork, NullLogger<CandidateChainWriter>.Instance),
             NullLogger<GraphStagePipeline>.Instance);
 
+        var findingWriter = new NormalizedFindingWriter(
+            unitOfWork, NullLogger<NormalizedFindingWriter>.Instance);
+
         return new RunGraphStageCommandHandler(
-            unitOfWork, caller, normalization, graphStage, NullLogger<RunGraphStageCommandHandler>.Instance);
+            unitOfWork, caller, normalization, findingWriter, graphStage,
+            NullLogger<RunGraphStageCommandHandler>.Instance);
     }
 
     private static (FakeUnitOfWork UnitOfWork, ScanJob Job) SeededJob(bool withBundle = true, bool purged = false)

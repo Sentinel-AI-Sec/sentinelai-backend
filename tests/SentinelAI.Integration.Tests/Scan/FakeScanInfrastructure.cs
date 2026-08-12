@@ -95,7 +95,12 @@ internal sealed class FakeGenericRepository<T> : IGenericRepository<T> where T :
     public IQueryable<TResult> Select<TResult>(Expression<Func<T, TResult>> selector) => throw new NotSupportedException();
     public IQueryable<T> GetTableAsTracked() => throw new NotSupportedException();
     public IQueryable<T> GetTableAsNotTracked() => throw new NotSupportedException();
-    public Task AddRangeAsync(ICollection<T> entities) => throw new NotSupportedException();
+    // NormalizedFindingWriter inserts a whole normalization run at once.
+    public Task AddRangeAsync(ICollection<T> entities)
+    {
+        Added.AddRange(entities);
+        return Task.CompletedTask;
+    }
 
     // CandidateChainWriter (SEC-20) marks the hot nodes it decorated. The real repository is
     // writing a change to an already-tracked entity, so recording the call is all a fake owes
@@ -110,7 +115,19 @@ internal sealed class FakeGenericRepository<T> : IGenericRepository<T> where T :
 
     public Task UpdateRangeAsync(ICollection<T> entities) => throw new NotSupportedException();
     public Task DeleteAsync(T entity) => throw new NotSupportedException();
-    public Task DeleteRangeAsync(ICollection<T> entities) => throw new NotSupportedException();
+
+    // NormalizedFindingWriter clears a previous run before writing the new one. Removing from
+    // Added is what "deleted" means to a fake whose store is that list.
+    public List<T> Deleted { get; } = [];
+
+    public Task DeleteRangeAsync(ICollection<T> entities)
+    {
+        Deleted.AddRange(entities);
+        foreach (var entity in entities)
+            Added.Remove(entity);
+
+        return Task.CompletedTask;
+    }
     public Task<bool> AnyAsync(Expression<Func<T, bool>> predicate) => throw new NotSupportedException();
     public Task SaveChangesAsync() => throw new NotSupportedException();
     public IDbContextTransaction BeginTransaction() => throw new NotSupportedException();
@@ -150,4 +167,10 @@ internal sealed class FakeUnitOfWork(IScanJobRepository scanJobRepository) : IUn
         CompleteCallCount++;
         return Task.FromResult(0);
     }
+
+    public int DiscardCallCount { get; private set; }
+
+    // Nothing to throw away: this fake's repositories persist on the call, not on CompleteAsync.
+    // Counting is enough to assert that a failing stage discards before recording its failure.
+    public void DiscardChanges() => DiscardCallCount++;
 }
