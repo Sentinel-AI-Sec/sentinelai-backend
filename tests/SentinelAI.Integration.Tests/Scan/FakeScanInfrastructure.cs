@@ -46,6 +46,9 @@ internal sealed class FakeBundleStore : IBundleStore
     public Task<IReadOnlyList<StoredBundleFile>> OpenFindingsAsync(string locator, CancellationToken ct)
         => throw new NotSupportedException();
 
+    public Task<IReadOnlyList<StoredBundleFile>> OpenGraphInputsAsync(string locator, CancellationToken ct)
+        => throw new NotSupportedException();
+
     public Task PurgeAsync(Guid scanJobId, CancellationToken ct)
     {
         Saved.Remove(scanJobId);
@@ -81,7 +84,13 @@ internal sealed class FakeGenericRepository<T> : IGenericRepository<T> where T :
 
     public Task<T?> GetByIdAsync(params object[] keyValues) => throw new NotSupportedException();
     public Task<IEnumerable<T>> GetAllAsync() => throw new NotSupportedException();
-    public Task<IEnumerable<T>> GetWhereAsync(Expression<Func<T, bool>> predicate) => throw new NotSupportedException();
+
+    // InfraSpineWriter (SEC-17) queries existing rows before inserting, to upsert rather than
+    // violate the (ScanJobId, NodeKey) unique index — this is the one query path a fake needs
+    // to actually model rather than throw on. Filters Added in memory; tests seed "already
+    // persisted" rows by adding to Added directly before exercising the writer.
+    public Task<IEnumerable<T>> GetWhereAsync(Expression<Func<T, bool>> predicate) =>
+        Task.FromResult(Added.Where(predicate.Compile()));
     public IQueryable<T> Where(Expression<Func<T, bool>> predicate) => throw new NotSupportedException();
     public IQueryable<TResult> Select<TResult>(Expression<Func<T, TResult>> selector) => throw new NotSupportedException();
     public IQueryable<T> GetTableAsTracked() => throw new NotSupportedException();

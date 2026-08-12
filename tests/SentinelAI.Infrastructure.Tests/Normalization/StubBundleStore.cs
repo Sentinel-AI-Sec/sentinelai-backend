@@ -20,5 +20,8 @@ internal sealed class StubBundleStore : Dictionary<string, string>, IBundleStore
     public Task<string> SaveAsync(Guid scanJobId, Stream bundle, CancellationToken ct)
         => throw new NotSupportedException();
 
+    public Task<IReadOnlyList<StoredBundleFile>> OpenGraphInputsAsync(string locator, CancellationToken ct)
+        => throw new NotSupportedException();
+
     public Task PurgeAsync(Guid scanJobId, CancellationToken ct) => throw new NotSupportedException();
 }

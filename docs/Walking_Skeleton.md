@@ -108,8 +108,38 @@ Both run offline. A walking-skeleton test that needs a live model is a test nobo
 
 ## 6. What is still missing
 
-- **Edges** — SEC-17/18. Until then no chain is expressible, and the skeleton says so rather
-  than inventing one.
+- **Edges** — SEC-17 landed the infra spine (Terraform DOT/HCL → attacker-oriented
+  `graph_nodes`/`graph_edges`, `seam = infra-spine`). SEC-18 (dep→code, role→resource seams)
+  and SEC-19 (code→infra image-name seam) have not, so no full cross-layer chain is
+  expressible yet — see the TODOs below for what SEC-17 itself left open.
 - **A real corpus** — SEC-09. `SeedKnowledgeRetriever` is the placeholder.
-- **Persistence** — the slice builds a `Report` and returns it; nothing writes it yet.
-- **The HTTP hop** — `POST /v1/scans` records a bundle but does not yet trigger the slice.
+- **Persistence** — the slice builds a `Report` and returns it; nothing writes it yet. This is
+  also still true of `GraphSeeder`'s own (SEC-16) nodes — only the SEC-17 infra spine
+  (`InfraSpineWriter`) actually writes to `GraphNodes`/`GraphEdges` today.
+- **The HTTP hop** — `POST /v1/scans` records a bundle but does not yet trigger the slice, and
+  nothing yet calls `InfraSpineWriter` from it either — it's a standalone, fully unit-tested
+  component (by design, per the SEC-17 ticket) that isn't wired into a live scan job.
+
+### TODOs left open by SEC-17
+
+- **Node-granularity gap between SEC-16 and SEC-17 (the biggest one).**
+  `FindingUnifier.BuildNodeRef` still gives infra-layer Checkov findings file-grained node
+  keys (e.g. `s3:infra/iam.tf`), while the SEC-17 infra spine builds resource-grained keys
+  (e.g. `s3:customer_data`, `iam_role:order_task_role`). They do not match, so infra findings
+  do not attach to their infra-spine nodes — the two node sets sit side by side as islands for
+  the same physical resource. Until this closes, Checkov-found infra issues can't seed or
+  decorate a chain that traverses the infra spine. Left alone deliberately for SEC-17 (out of
+  its stated scope — see `TerraformInfraSpineReader`'s doc comment), but it needs an owner
+  before SEC-18/19/20 can be called complete.
+- **`InfraSpineWriter` is not called from anywhere yet.** No handler or pipeline invokes it
+  during a real scan — it needs a call site once scan-job persistence (see above) exists to
+  wire it into.
+- **The wildcard-policy → bucket edge is intentionally absent.** Verified against the real
+  fixture: `terraform graph` never draws an edge from `aws_iam_role_policy.order_task_policy`
+  to `aws_s3_bucket.customer_data`, because the policy's `Resource = "*"` is a literal, not a
+  reference. The flagship IAM→S3 reachability has to come from policy-document analysis
+  (`Seam.RoleResource`), which is SEC-18's job, not SEC-17's.
+- **Several Terraform resource types have no canonical `NodeType` yet** — `aws_security_group`,
+  `aws_iam_role_policy`, `aws_s3_bucket_versioning`, `aws_s3_bucket_public_access_block` are
+  parsed but dropped as noise at canonicalization (`TerraformResourceTypeMap`). Extending the
+  mapping needs a new `NodeType` member first, which is a SEC-03 decision.
