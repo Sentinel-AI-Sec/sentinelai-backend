@@ -58,6 +58,38 @@ public class AuthEndpointTests : IClassFixture<ScanApiFactory>
         Assert.Equal(HttpStatusCode.NotFound, protectedResponse.StatusCode);
     }
 
+    /// <summary>
+    /// A login token has to carry the scopes its role implies, not just a role.
+    /// </summary>
+    /// <remarks>
+    /// This is the hole that let every scan endpoint answer 403 to a perfectly valid admin token:
+    /// <c>JwtTokenIssuer</c> issued <c>sub</c>, <c>tenant_id</c>, <c>role</c> and <c>jti</c> and no
+    /// <c>scope</c> at all, so <c>HasScope</c> was false for every human user who ever logged in.
+    /// The suite missed it because the scan tests mint their own tokens with <c>TestJwt</c> and
+    /// hand themselves the scopes — nothing exercised the real issuer. So this asserts through a
+    /// scope-gated endpoint: a token that reaches "no such job" got past the gate, and a 403 here
+    /// means the regression is back.
+    /// </remarks>
+    [Fact]
+    public async Task The_token_register_issues_carries_the_scopes_its_role_implies()
+    {
+        var client = _factory.CreateClient();
+
+        var registerResponse = await client.PostAsJsonAsync("/v1/auth/register",
+            new { Email = UniqueEmail(), Password = "correct-horse-battery-staple", TenantName = "Acme Inc" });
+
+        var body = await ReadAsync<AuthTokenResponse>(registerResponse);
+        Assert.NotNull(body.Data);
+        Assert.Contains("scan:write", body.Data!.Scopes);
+        Assert.Contains("scan:read", body.Data.Scopes);
+        Assert.Contains("report:read", body.Data.Scopes);
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", body.Data.AccessToken);
+        var gated = await client.PostAsync($"/v1/scans/{Guid.NewGuid()}/graph", content: null);
+
+        Assert.Equal(HttpStatusCode.NotFound, gated.StatusCode);
+    }
+
     [Fact]
     public async Task Registering_the_same_email_twice_is_rejected()
     {

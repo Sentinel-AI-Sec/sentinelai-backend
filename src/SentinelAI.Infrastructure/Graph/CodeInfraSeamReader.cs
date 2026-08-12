@@ -23,10 +23,31 @@ namespace SentinelAI.Infrastructure.Graph;
 /// is nothing to relate, which is different from an unresolved join and not a case the ticket
 /// asks this reader to record.</item>
 /// </list>
+/// <para>
+/// Each match also yields a <c>Task</c> node and a <c>code → task</c> <c>deployed-as</c> edge at
+/// the same confidence (added for SEC-20 — see <see cref="DeployedAsRelation"/> for why the
+/// chain runs through the workload rather than through the image node).
+/// </para>
 /// </summary>
 public sealed class CodeInfraSeamReader : ICodeInfraSeamReader
 {
+    /// <summary>Code → the image it is built into. What the name match actually compared.</summary>
     private const string Relation = "runs-as";
+
+    /// <summary>
+    /// Code → the workload that image is deployed into. Carries the same confidence as the
+    /// <c>runs-as</c> edge beside it, because it rests on the same evidence: the name match is
+    /// what says this project's code is what runs in that task definition.
+    /// </summary>
+    /// <remarks>
+    /// This is the traversable half of the seam. The image node is the evidence of the join —
+    /// the artifact whose name was compared — but an attacker does not move "into an image";
+    /// they reach the workload it is deployed as, which is the node the infra spine's
+    /// <c>assumes</c> edge continues from. Emitting both keeps the evidence visible without
+    /// spending a hop of the 3–4 hop budget (AID-01 §3.2) on a node no scanner reports on and
+    /// no attacker stands in.
+    /// </remarks>
+    private const string DeployedAsRelation = "deployed-as";
 
     public CodeInfraSeamReadResult Read(CodeInfraSeamInput input, Guid tenantId, Guid scanJobId)
     {
@@ -49,7 +70,7 @@ public sealed class CodeInfraSeamReader : ICodeInfraSeamReader
         var normalizedDockerImage = ImageNameNormalizer.Normalize(dockerImage);
         var variables = TerraformVariableResolver.Resolve(input.HclFiles);
 
-        foreach (var rawImageRef in taskImageRefs.Values)
+        foreach (var (taskDefinitionName, rawImageRef) in taskImageRefs)
         {
             var (resolvedRef, resolvedVariable) = TerraformVariableResolver.Substitute(rawImageRef, variables);
             if (string.IsNullOrWhiteSpace(resolvedRef)) continue;
@@ -78,6 +99,21 @@ public sealed class CodeInfraSeamReader : ICodeInfraSeamReader
             var confidence = normalizedDockerImage == normalizedInfraImage ? Confidence.Inferred : Confidence.Unresolved;
 
             edges.Add(new CodeInfraSeamEdge(codeNodeKey, imageNodeKey, Relation, confidence, resolvedVariable));
+
+            // The workload the image is deployed into. Its node key is built from the task
+            // definition's Terraform resource name, which is the same string
+            // TerraformInfraSpineReader canonicalizes — that string equality is the whole join
+            // between this seam and the infra spine, and getting it wrong is the island bug.
+            var taskNodeKey = NodeId.For(NodeType.Task, taskDefinitionName);
+            if (!nodesByKey.ContainsKey(taskNodeKey))
+            {
+                var taskNode = GraphNode.Create(tenantId, scanJobId, NodeType.Task, taskDefinitionName, Layer.Infra);
+                taskNode.Id = Guid.CreateVersion7();
+                nodesByKey[taskNodeKey] = taskNode;
+            }
+
+            edges.Add(new CodeInfraSeamEdge(
+                codeNodeKey, taskNodeKey, DeployedAsRelation, confidence, resolvedVariable));
         }
 
         return new CodeInfraSeamReadResult([.. nodesByKey.Values], edges);

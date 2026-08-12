@@ -47,7 +47,8 @@ public sealed record CodeInfraSeamEdge(
     string FromNodeKey, string ToNodeKey, string Relation, Confidence Confidence, bool ResolvedVariable);
 
 /// <summary>The result of one <see cref="ICodeInfraSeamReader.Read"/> call.</summary>
-/// <param name="Nodes">The project's <c>Code</c> node plus one <c>Image</c> node per distinct
+/// <param name="Nodes">The project's <c>Code</c> node, one <c>Image</c> node per distinct
 /// normalized image name this reader found evidence of (Dockerfile side, task-definition side,
-/// or both).</param>
+/// or both), and one <c>Task</c> node per task definition those images came from — the workload
+/// the <c>deployed-as</c> edge lands on.</param>
 public sealed record CodeInfraSeamReadResult(IReadOnlyList<GraphNode> Nodes, IReadOnlyList<CodeInfraSeamEdge> Edges);

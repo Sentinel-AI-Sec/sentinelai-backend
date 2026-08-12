@@ -30,16 +30,30 @@ namespace SentinelAI.Infrastructure.Graph;
 /// <item><b>Orientation regression guard</b> — lives with step 2:
 /// <c>AttackDirectionOrienterTests</c> in the Infrastructure test project.</item>
 /// </list>
+/// <para>
+/// One edge is not derived from the reversed graph: <c>task → role</c> (<c>assumes</c>), read
+/// from the task definition's own role reference by <see cref="TaskDefinitionRoleExtractor"/>.
+/// Added for SEC-20, which cannot reach the flagship chain's IAM hop without it — see
+/// <see cref="AddAssumesEdges"/> and that extractor's remarks.
+/// </para>
 /// </summary>
 public sealed class TerraformInfraSpineReader(ILogger<TerraformInfraSpineReader> logger) : IInfraSpineReader
 {
     /// <summary>
-    /// The relation label for every edge this reader produces. Deliberately one constant
-    /// rather than one per resource-type pair: every edge here means the same thing regardless
-    /// of what the two endpoints are — "the attacker at <c>From</c> can reach <c>To</c>" — and
-    /// that's exactly <c>can-access</c> in the SEC-03 relation vocabulary (Data_Contracts.md).
+    /// The relation label for every edge derived from the reversed dependency graph.
+    /// Deliberately one constant rather than one per resource-type pair: every such edge means
+    /// the same thing regardless of what the two endpoints are — "the attacker at <c>From</c>
+    /// can reach <c>To</c>" — and that's exactly <c>can-access</c> in the SEC-03 relation
+    /// vocabulary (Data_Contracts.md).
     /// </summary>
     private const string Relation = "can-access";
+
+    /// <summary>
+    /// The relation for the one edge this reader does <em>not</em> derive by reversal: a task
+    /// definition assuming its IAM role. See <see cref="TaskDefinitionRoleExtractor"/> for why
+    /// that edge is read from the reference itself rather than taken from the reversed graph.
+    /// </summary>
+    private const string AssumesRelation = "assumes";
 
     public InfraSpineReadResult Read(InfraSpineInput input, Guid tenantId, Guid scanJobId)
     {
@@ -116,6 +130,55 @@ public sealed class TerraformInfraSpineReader(ILogger<TerraformInfraSpineReader>
             edges.Add(new InfraSpineEdge(fromKey, toKey, Relation, edge.OrientedAttackDir));
         }
 
+        AddAssumesEdges(input.HclFiles, nodeKeyByAddress, edges, seenEdges, scanJobId);
+
         return new InfraSpineReadResult([.. nodesByKey.Values], edges, usedHclFallback);
+    }
+
+    /// <summary>
+    /// Adds a <c>task → role</c> <c>assumes</c> edge for every task definition that names an
+    /// IAM role literally.
+    /// </summary>
+    /// <remarks>
+    /// Runs on both the DOT and the HCL-fallback path, and reads the <c>.tf</c> source either
+    /// way, because the DOT graph records that the dependency exists but not that it is a role
+    /// attachment — and the direction only follows from knowing that. Nothing is added when the
+    /// bundle carried no HCL, which is the same degraded-but-honest outcome the rest of this
+    /// reader gives: fewer edges, never invented ones.
+    /// <para>
+    /// Both endpoints are resolved through <paramref name="nodeKeyByAddress"/> rather than
+    /// rebuilt with <see cref="NodeId"/>, so an edge is only emitted between nodes this reader
+    /// really produced — and so a module-qualified address (which the HCL extractors cannot
+    /// see) is skipped rather than joined to the wrong node key.
+    /// </para>
+    /// </remarks>
+    private void AddAssumesEdges(
+        IReadOnlyDictionary<string, string> hclFiles,
+        IReadOnlyDictionary<string, string> nodeKeyByAddress,
+        List<InfraSpineEdge> edges,
+        HashSet<(string From, string To)> seenEdges,
+        Guid scanJobId)
+    {
+        var rolesByTaskDefinition = TaskDefinitionRoleExtractor.ExtractRoleNamesByTaskDefinitionName(hclFiles);
+
+        foreach (var (taskName, roleNames) in rolesByTaskDefinition)
+        {
+            if (!nodeKeyByAddress.TryGetValue($"aws_ecs_task_definition.{taskName}", out var taskKey))
+            {
+                logger.LogWarning(
+                    "Task definition {TaskName} names an IAM role but produced no canonical node " +
+                    "for scan job {ScanJobId}; no assumes edge emitted",
+                    taskName, scanJobId);
+                continue;
+            }
+
+            foreach (var roleName in roleNames)
+            {
+                if (!nodeKeyByAddress.TryGetValue($"aws_iam_role.{roleName}", out var roleKey)) continue;
+                if (!seenEdges.Add((taskKey, roleKey))) continue;
+
+                edges.Add(new InfraSpineEdge(taskKey, roleKey, AssumesRelation, OrientedAttackDir: true));
+            }
+        }
     }
 }

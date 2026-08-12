@@ -108,10 +108,6 @@ Both run offline. A walking-skeleton test that needs a live model is a test nobo
 
 ## 6. What is still missing
 
-- **Edges** — SEC-17 landed the infra spine (Terraform DOT/HCL → attacker-oriented
-  `graph_nodes`/`graph_edges`, `seam = infra-spine`). SEC-18 (dep→code, role→resource seams)
-  and SEC-19 (code→infra image-name seam) have not, so no full cross-layer chain is
-  expressible yet — see the TODOs below for what SEC-17 itself left open.
 - **A real corpus** — SEC-09. `SeedKnowledgeRetriever` is the placeholder.
 - **Persistence** — the slice builds a `Report` and returns it; nothing writes it yet. This is
   also still true of `GraphSeeder`'s own (SEC-16) nodes — only the SEC-17 infra spine
@@ -120,20 +116,50 @@ Both run offline. A walking-skeleton test that needs a live model is a test nobo
   nothing yet calls `InfraSpineWriter` from it either — it's a standalone, fully unit-tested
   component (by design, per the SEC-17 ticket) that isn't wired into a live scan job.
 
-### TODOs left open by SEC-17
+### Edges and chaining: what SEC-17/18/19/20 landed
 
-- **Node-granularity gap between SEC-16 and SEC-17 (the biggest one).**
-  `FindingUnifier.BuildNodeRef` still gives infra-layer Checkov findings file-grained node
-  keys (e.g. `s3:infra/iam.tf`), while the SEC-17 infra spine builds resource-grained keys
-  (e.g. `s3:customer_data`, `iam_role:order_task_role`). They do not match, so infra findings
-  do not attach to their infra-spine nodes — the two node sets sit side by side as islands for
-  the same physical resource. Until this closes, Checkov-found infra issues can't seed or
-  decorate a chain that traverses the infra spine. Left alone deliberately for SEC-17 (out of
-  its stated scope — see `TerraformInfraSpineReader`'s doc comment), but it needs an owner
-  before SEC-18/19/20 can be called complete.
-- **`InfraSpineWriter` is not called from anywhere yet.** No handler or pipeline invokes it
-  during a real scan — it needs a call site once scan-job persistence (see above) exists to
-  wire it into.
+The four seams now build one connected graph, and SEC-20 traverses it into bounded candidate
+chains. The fixture's flagship chain reconstructs end to end:
+
+```
+pkg:newtonsoft.json --used-by(certain)--> code:orderapp --deployed-as(inferred)-->
+task:order_task --assumes(certain)--> iam_role:order_task_role --can-access(certain)-->
+s3:customer_data
+```
+
+Four hops, `min_confidence = inferred` (the image-name join is the weakest link).
+`FlagshipChainTests` runs every real reader, writer, unifier, locator, decorator and traverser
+over the fixture's own Terraform and asserts exactly that. Two joins SEC-20 had to add for it to
+connect, both documented in `Data_Contracts.md` §2:
+
+- **`code → task` (`deployed-as`).** SEC-19 emitted only `code → image`, which dead-ends: no
+  edge left the image node. The task definition is where the code actually runs and what the
+  `assumes` edge continues from.
+- **`task → role` (`assumes`).** The DOT reversal produces `iam_role → task`, which is the wrong
+  way round for this pair. Rather than special-case `AttackDirectionOrienter` — whose regression
+  test is the standing guard against the zero-chains bug — the spine reads the role attachment
+  from the task definition's own `task_role_arn`. Both edges exist; the ATT&CK tactic ordering in
+  traversal discards the backwards one.
+
+**Node-granularity gap: closed by SEC-20.** `FindingUnifier` still keys findings by the finest
+subject their scanner reported, and it should; `GraphDecorator` is now the join between that and
+the structural nodes, with `IInfraFindingLocator` doing the Terraform line-to-resource half. See
+`Data_Contracts.md` §1, "Two granularities, and how they join". Without it there are no hot
+seeds and therefore no chains at all, which is why the ticket that needed seeds is the one that
+closed it.
+
+### TODOs left open
+
+- **No worker runs the pipeline.** `GraphStagePipeline` now composes the four seam writers plus
+  SEC-20 into one callable unit, and `POST /v1/scans/{id}/graph` triggers it by hand — see
+  `docs/Testing_With_Postman.md`. That is a manual trigger in the spirit of
+  `POST /v1/debates/demo`, not a worker: nothing dequeues the `Queued` job ingest writes, and
+  the debate and report stages still have no call site at all.
+- **The Dockerfile image label is a local convention.** `DockerfileImageNameExtractor` reads
+  `LABEL org.sentinelai.image`, which is not a Docker or OCI standard, and without it the
+  code→infra seam has nothing to compare. The label was missing from the committed fixture until
+  SEC-20 added it; a real repository has no reason to carry one, so reading the image name from
+  the build invocation is the eventual fix.
 - **The wildcard-policy → bucket edge is intentionally absent.** Verified against the real
   fixture: `terraform graph` never draws an edge from `aws_iam_role_policy.order_task_policy`
   to `aws_s3_bucket.customer_data`, because the policy's `Resource = "*"` is a literal, not a

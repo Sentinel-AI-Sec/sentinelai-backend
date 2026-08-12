@@ -137,4 +137,71 @@ public class TerraformInfraSpineReaderTests
 
         Assert.False(result.UsedHclFallback);
     }
+
+    /// <summary>
+    /// SEC-20's addition. The DOT graph says the task depends on the role, which reverses to
+    /// <c>role → task</c>; the attacker moves the other way, and the task definition's own
+    /// <c>task_role_arn</c> is where that direction is stated. Both edges are emitted — the
+    /// reversal is left exactly as SEC-17 wrote it — and the tactic ordering in traversal is
+    /// what discards the backwards one.
+    /// </summary>
+    [Fact]
+    public void The_task_role_reference_yields_an_assumes_edge_in_attack_direction()
+    {
+        const string mainTf = """
+            resource "aws_ecs_task_definition" "order_task" {
+              family        = "order-task"
+              task_role_arn = aws_iam_role.order_task_role.arn
+            }
+
+            resource "aws_iam_role" "order_task_role" {
+              name = "order-task-role"
+            }
+            """;
+
+        var result = _reader.Read(
+            new InfraSpineInput(FlagshipDot, new Dictionary<string, string> { ["infra/main.tf"] = mainTf }),
+            Tenant, Job);
+
+        var taskKey = NodeId.For(NodeType.Task, "order_task");
+        var roleKey = NodeId.For(NodeType.IamRole, "order_task_role");
+
+        var assumes = Assert.Single(result.Edges, e => e.Relation == "assumes");
+        Assert.Equal(taskKey, assumes.FromNodeKey);
+        Assert.Equal(roleKey, assumes.ToNodeKey);
+        Assert.True(assumes.OrientedAttackDir);
+
+        // The reversal's own edge is untouched and still points the other way.
+        Assert.Contains(result.Edges, e => e.FromNodeKey == roleKey && e.ToNodeKey == taskKey && e.Relation == "can-access");
+    }
+
+    /// <summary>
+    /// The <c>assumes</c> edge is read from the <c>.tf</c> source, so a bundle that carried only
+    /// a DOT graph gets fewer edges rather than invented ones.
+    /// </summary>
+    [Fact]
+    public void No_terraform_source_means_no_assumes_edge()
+    {
+        var result = _reader.Read(
+            new InfraSpineInput(FlagshipDot, HclFiles: new Dictionary<string, string>()), Tenant, Job);
+
+        Assert.DoesNotContain(result.Edges, e => e.Relation == "assumes");
+    }
+
+    /// <summary>An assumes edge is only emitted when both endpoints are real nodes here.</summary>
+    [Fact]
+    public void A_role_that_never_became_a_node_produces_no_assumes_edge()
+    {
+        const string mainTf = """
+            resource "aws_ecs_task_definition" "order_task" {
+              task_role_arn = aws_iam_role.some_other_role.arn
+            }
+            """;
+
+        var result = _reader.Read(
+            new InfraSpineInput(FlagshipDot, new Dictionary<string, string> { ["infra/main.tf"] = mainTf }),
+            Tenant, Job);
+
+        Assert.DoesNotContain(result.Edges, e => e.Relation == "assumes");
+    }
 }

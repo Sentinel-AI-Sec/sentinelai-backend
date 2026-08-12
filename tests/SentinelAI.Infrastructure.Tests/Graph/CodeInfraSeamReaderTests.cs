@@ -50,12 +50,61 @@ public class CodeInfraSeamReaderTests
             new CodeInfraSeamInput("src/OrderService/Dockerfile", Dockerfile, new Dictionary<string, string> { ["ecs.tf"] = MatchingTaskDefTf }),
             Tenant, Job);
 
-        var edge = Assert.Single(result.Edges);
+        var edge = Assert.Single(result.Edges, e => e.Relation == "runs-as");
         Assert.Equal(Confidence.Inferred, edge.Confidence);
-        Assert.Equal("runs-as", edge.Relation);
         Assert.Equal(NodeId.Code("OrderService"), edge.FromNodeKey);
         Assert.Equal(NodeId.Image("tinyapp/order"), edge.ToNodeKey);
         Assert.False(edge.ResolvedVariable);
+    }
+
+    /// <summary>
+    /// SEC-20's addition: the traversable half of the seam. The image node records what was
+    /// compared; this edge records where the code actually runs, which is the node the infra
+    /// spine's <c>assumes</c> edge continues from.
+    /// </summary>
+    [Fact]
+    public void A_match_also_joins_the_code_to_the_workload_it_is_deployed_into()
+    {
+        var result = _reader.Read(
+            new CodeInfraSeamInput("src/OrderService/Dockerfile", Dockerfile, new Dictionary<string, string> { ["ecs.tf"] = MatchingTaskDefTf }),
+            Tenant, Job);
+
+        var edge = Assert.Single(result.Edges, e => e.Relation == "deployed-as");
+        Assert.Equal(NodeId.Code("OrderService"), edge.FromNodeKey);
+        Assert.Equal(NodeId.Task("order_task"), edge.ToNodeKey);
+
+        // Same evidence as the runs-as edge beside it, so the same confidence — never stronger.
+        Assert.Equal(Confidence.Inferred, edge.Confidence);
+        Assert.Contains(result.Nodes, n => n.NodeKey == NodeId.Task("order_task") && n.NodeType == NodeType.Task);
+    }
+
+    /// <summary>
+    /// The task node's key is built from the Terraform resource name, which is the same string
+    /// <c>TerraformInfraSpineReader</c> canonicalizes. That equality is the entire join between
+    /// this seam and the infra spine; if it drifts, the graph splits and no chain crosses.
+    /// </summary>
+    [Fact]
+    public void The_task_node_key_matches_the_infra_spines_spelling()
+    {
+        const string spineTf = """
+            resource "aws_ecs_task_definition" "order_task" {
+              family = "order-task"
+              container_definitions = jsonencode([{ name = "order", image = "tinyapp/order:1.0" }])
+            }
+            """;
+
+        var seam = _reader.Read(
+            new CodeInfraSeamInput("src/OrderService/Dockerfile", Dockerfile, new Dictionary<string, string> { ["ecs.tf"] = spineTf }),
+            Tenant, Job);
+
+        var spine = new TerraformInfraSpineReader(
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<TerraformInfraSpineReader>.Instance)
+            .Read(new InfraSpineInput(DotText: null, new Dictionary<string, string> { ["ecs.tf"] = spineTf }), Tenant, Job);
+
+        var seamTaskKey = Assert.Single(seam.Nodes, n => n.NodeType == NodeType.Task).NodeKey;
+        var spineTaskKey = Assert.Single(spine.Nodes, n => n.NodeType == NodeType.Task).NodeKey;
+
+        Assert.Equal(spineTaskKey, seamTaskKey);
     }
 
     [Fact]
@@ -85,8 +134,8 @@ public class CodeInfraSeamReaderTests
             new CodeInfraSeamInput("src/OrderService/Dockerfile", Dockerfile, new Dictionary<string, string> { ["ecs.tf"] = mismatchedTaskDefTf }),
             Tenant, Job);
 
-        var edge = Assert.Single(result.Edges);
-        Assert.Equal(Confidence.Unresolved, edge.Confidence);
+        Assert.All(result.Edges, e => Assert.Equal(Confidence.Unresolved, e.Confidence));
+        Assert.Equal(["deployed-as", "runs-as"], result.Edges.Select(e => e.Relation).Order().ToList());
     }
 
     [Fact]
@@ -109,7 +158,7 @@ public class CodeInfraSeamReaderTests
             new CodeInfraSeamInput("src/OrderService/Dockerfile", Dockerfile, new Dictionary<string, string> { ["ecs.tf"] = tf }),
             Tenant, Job);
 
-        var edge = Assert.Single(result.Edges);
+        var edge = Assert.Single(result.Edges, e => e.Relation == "runs-as");
         Assert.Equal(Confidence.Inferred, edge.Confidence);
         Assert.True(edge.ResolvedVariable);
     }
