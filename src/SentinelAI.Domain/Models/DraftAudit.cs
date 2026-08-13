@@ -30,6 +30,12 @@ public sealed record DraftAudit
     /// <summary>Weakest confidence across the whole transcript (AID-01 section 3.3).</summary>
     public Confidence WeakestJoin { get; init; } = Confidence.Certain;
 
+    /// <summary>
+    /// What this audit cost, split by model tier (SEC-31). Defaults to
+    /// <see cref="AuditCost.None"/> — nothing measured — rather than to zero spend.
+    /// </summary>
+    public AuditCost Cost { get; init; } = AuditCost.None;
+
     /// <summary>Non-negotiable framing per AID-01 section 7.</summary>
     public string Disclaimer =>
         "Prioritized draft audit for human review — not a verified verdict.";

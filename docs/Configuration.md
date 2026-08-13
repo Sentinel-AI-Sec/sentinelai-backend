@@ -159,16 +159,55 @@ credentials at all. `appsettings.Development.json` overrides it to a live provid
 ## 3. Model tiers
 
 AID-01 §2.1 routes reasoning-heavy turns to a high tier and routine turns to a cheap one.
+The shipped policy, in `SentinelAI:Debate:Tiers`:
 
-```csharp
-Tiers[AgentRole.Red]      = ModelTier.High;
-Tiers[AgentRole.Blue]     = ModelTier.High;
-Tiers[AgentRole.Reporter] = ModelTier.High;
+| Role | Tier | Why |
+|---|---|---|
+| `Red` | `High` | Chaining — reasoning-heavy. |
+| `Blue` | `High` | Link validation — reasoning-heavy, and the false-positive reducer. |
+| `Reporter` | `High` | Adjudication — reasoning-heavy. |
+| `Orchestrator` | `Cheap` | Briefs Red from the graph and asserts nothing. The routine turn. |
+
+Which model id a tier resolves to is `HighTierModel` / `CheapTierModel` (§1), per provider.
+Overriding a role is a config change:
+
+```json
+"SentinelAI": { "Debate": { "Tiers": { "Reporter": "Cheap" } } }
 ```
 
-All three default to high because chaining, link validation and adjudication are all
-reasoning-heavy. The cheap tier is wired and available for routine formatting work added
-later.
+Whatever the map says, **the tier that actually served a turn is stamped on that turn** and
+shows up in the audit's cost breakdown — see [Cost_Tracking.md](Cost_Tracking.md). Reading
+the policy back out of configuration would describe what the settings say now rather than
+what ran.
+
+---
+
+## 3.1 Token prices
+
+`SentinelAI:Models:Pricing` turns measured tokens into money. Rates are per **million**
+tokens, quoted separately for input and output because every provider prices them
+differently.
+
+```json
+"SentinelAI": {
+  "Models": {
+    "Pricing": {
+      "Currency": "USD",
+      "High":  { "InputPerMillionTokens": 2.50, "OutputPerMillionTokens": 10.00 },
+      "Cheap": { "InputPerMillionTokens": 0.15, "OutputPerMillionTokens": 0.60 }
+    }
+  }
+}
+```
+
+Nothing needs to be set for Azure, Anthropic or Scripted: published list prices are built
+into `ProviderPricing` and used per tier when configuration supplies none. Configuration wins
+where it is present, which is what negotiated rates and repriced models need.
+
+**NIM ships no default**, because its price depends on how it is hosted. Its tokens are still
+counted; the audit reports them with `rated: false` and a total of zero, which means *"we do
+not know what this cost"* rather than *"this was free"*. Set the two `High`/`Cheap` blocks
+above to price it. Full behaviour in [Cost_Tracking.md](Cost_Tracking.md).
 
 ---
 

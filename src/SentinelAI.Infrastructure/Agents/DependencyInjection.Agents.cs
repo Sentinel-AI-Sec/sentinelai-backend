@@ -36,6 +36,12 @@ public static class AgentsDependencyInjection
         // Turn-cap, model tiers, token budget.
         services.Configure<DebateOptions>(configuration.GetSection(DebateOptions.SectionName));
 
+        // SEC-31: what a token costs on this provider. Loaded here, next to the provider it
+        // is priced against, so nothing downstream has to know which vendor it is billing.
+        // Config wins; published list prices fill the gaps; an unpriced tier stays unpriced
+        // rather than defaulting to zero and reporting a live debate as free.
+        services.AddSingleton(ProviderPricing.Load(configuration, models.Provider));
+
         // Singleton because it caches one remote client per (role, tier) — a workflow is
         // built per scan, so a scoped factory would rebuild those connections every request.
         services.AddSingleton<IChatClientFactory>(_ => new ChatClientFactory(models));

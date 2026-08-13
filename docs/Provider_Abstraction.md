@@ -186,5 +186,7 @@ Anthropic does.**
   the SEC-02 design and it works, but native `/v1/messages` would need its own branch —
   the same shape as the Azure one.
 - **The tier map is provider-independent by design.** `DebateOptions.Tiers` says Red is a
-  High-tier turn; what "High" costs differs per provider. Nothing compares spend across
-  providers, so a switch changes cost silently.
+  High-tier turn; what "High" costs differs per provider. SEC-31 narrowed this: rates are now
+  resolved per provider and every audit records its spend by tier — see
+  [Cost_Tracking.md](Cost_Tracking.md). What is still true is that nothing compares spend
+  *across* providers, so a switch changes cost without anything saying by how much.

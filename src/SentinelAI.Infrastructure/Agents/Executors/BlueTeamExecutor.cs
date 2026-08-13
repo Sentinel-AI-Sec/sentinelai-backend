@@ -9,7 +9,8 @@ namespace SentinelAI.Infrastructure.Agents.Executors;
 /// (AID-01 3.1 — the false-positive reducer). Its verdict drives the loop: if Blue
 /// cannot break a link the debate has converged and moves to the Reporter.
 /// </summary>
-public sealed class BlueTeamExecutor(AIAgent agent) : DebateExecutor(ExecutorId, agent, AgentRole.Blue)
+public sealed class BlueTeamExecutor(AIAgent agent, ModelTier tier = ModelTier.High)
+    : DebateExecutor(ExecutorId, agent, AgentRole.Blue, tier)
 {
     /// <summary>Node id in the workflow graph. Named to avoid shadowing <c>Executor.Id</c>.</summary>
     public const string ExecutorId = "blue-team";

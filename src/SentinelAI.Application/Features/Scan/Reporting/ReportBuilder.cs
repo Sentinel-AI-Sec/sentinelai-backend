@@ -46,6 +46,8 @@ public sealed class ReportBuilder
             CreatedAt = createdAtUtc,
         };
 
+        Bill(report, audit.Cost);
+
         foreach (var chunk in knowledge)
         {
             report.Citations.Add(new Citation
@@ -60,6 +62,31 @@ public sealed class ReportBuilder
         }
 
         return report;
+    }
+
+    /// <summary>
+    /// Copies the debate's per-tier spend onto the report, so SEC-31's "cost per scan" is a
+    /// stored fact rather than something only the process that ran the debate ever saw.
+    /// </summary>
+    /// <remarks>
+    /// A tier the debate never used leaves its columns at zero, which is correct: no call, no
+    /// tokens, no cost. What the zeros must not be read as is a priced result — that is what
+    /// <see cref="Report.CostRated"/> is for.
+    /// </remarks>
+    private static void Bill(Report report, AuditCost cost)
+    {
+        var high = cost.UsageFor(ModelTier.High);
+        var cheap = cost.UsageFor(ModelTier.Cheap);
+
+        report.CostCurrency = cost.Currency;
+        report.HighTierInputTokens = high.InputTokens;
+        report.HighTierOutputTokens = high.OutputTokens;
+        report.HighTierCost = cost.CostFor(ModelTier.High);
+        report.CheapTierInputTokens = cheap.InputTokens;
+        report.CheapTierOutputTokens = cheap.OutputTokens;
+        report.CheapTierCost = cost.CostFor(ModelTier.Cheap);
+        report.ModelCalls = cost.TotalCalls;
+        report.CostRated = cost.FullyRated;
     }
 
     /// <summary>

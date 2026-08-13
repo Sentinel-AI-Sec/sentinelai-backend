@@ -13,6 +13,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Nothing here writes to the repository — no comment posting, no release, no push. The secrets
+# job in particular only reads the checkout.
+permissions:
+  contents: read
+
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -83,8 +88,27 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore
+        # Not optional, and not implied by the ef command below. `dotnet ef` reads the project
+        # through MSBuild, and MSBuild cannot evaluate a project that has no
+        # obj/project.assets.json — so the job died at NETSDK1004 before it ever loaded the
+        # model. The message it prints, "Unable to retrieve project metadata. Ensure it's an
+        # SDK-style project", reads like a malformed csproj rather than a missing restore, which
+        # is why this was worth a comment.
+        run: dotnet restore SentinelAI.slnx
+
       - name: Install EF tools
-        run: dotnet tool install --global dotnet-ef
+        # Pinned to the EF Core major the projects reference (10.0.x). The global tool is
+        # resolved at install time, so an unpinned install silently follows the newest release
+        # and starts failing against this runtime on the next major.
+        run: dotnet tool install --global dotnet-ef --version 10.0.*
 
       - name: Fail if the model drifted from the last migration
         # Catches an entity change merged without its migration, which otherwise surfaces as
