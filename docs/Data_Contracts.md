@@ -70,6 +70,37 @@ is one edit and one failing test, never a hunt through string literals.
 > jewel was a bucket. It is kept as-is because SEC-04's fixtures and SEC-06's corpus already
 > emit it. Widening it to `resource` is a team decision.
 
+### Two granularities, and how they join (SEC-20)
+
+A canonical key is not enough on its own, because two stages legitimately key the same thing at
+different grains:
+
+| Thing | What the scanner reports | What the graph reader builds |
+|---|---|---|
+| A package | `pkg:newtonsoft.json:12.0.1` | `pkg:newtonsoft.json` |
+| A project | `code:src/orderapp/controllers/orderscontroller.cs` | `code:orderapp` |
+| An IAM role | `s3:infra/iam.tf` | `iam_role:order_task_role` |
+
+Both sides are canonical. Neither is wrong — a scanner reports the finest subject it saw, a
+reader reports the structure it parsed. Left unjoined they are the island bug all over again:
+findings with no nodes, nodes with no findings, **no hot seeds, and therefore zero chains, with
+nothing erroring.**
+
+`GraphDecorator` is the join, and every rule it applies is a demonstrable identity rather than a
+similarity score:
+
+- **Package** — drop the version. Same package; never the reverse, since adding a version to a
+  node key would invent a coordinate nothing reported.
+- **Code** — the file belongs to the project whose directory is one of its own path segments,
+  deepest first. A file's *own name* never claims it, or `src/billing/orderapp.cs` would be
+  claimed by `code:orderapp`.
+- **Infra** — `IInfraFindingLocator` resolves `path:line` to the Terraform block containing it.
+  A block with no canonical node type (`aws_iam_role_policy`, `aws_s3_bucket_versioning`) exists
+  to configure one that has, and names it literally, so the finding decorates *that* resource.
+
+A finding no rule places stays **unattached and counted**. Attaching it to a plausible-looking
+node would seed candidate chains describing an attack on something nobody reported.
+
 ---
 
 ## 2. The five contracts
@@ -135,19 +166,56 @@ A connection between two nodes. **Every edge carries a seam and a confidence.**
 
 | Field | Type | Notes |
 |---|---|---|
-| `Relation` | `string` | `used-by` \| `built-into` \| `deployed-as` \| `assumes` \| `can-access` |
+| `Relation` | `string` | `used-by` \| `built-into` \| `runs-as` \| `deployed-as` \| `assumes` \| `can-access` |
 | `Seam` | `Seam` | `InfraSpine` \| `DepCode` \| `CodeInfra` \| `RoleResource` |
 | `Confidence` | `Confidence` | `Unresolved` \| `Inferred` \| `Certain` |
 | `OrientedAttackDir` | `bool` | The edge points the way an attacker moves |
+
+Which relation each seam emits today:
+
+| Relation | From → to | Seam | Confidence |
+|---|---|---|---|
+| `used-by` | package → code | `DepCode` | `Certain` — a lock file is explicit |
+| `runs-as` | code → image | `CodeInfra` | the image-name match's own tier |
+| `deployed-as` | code → task | `CodeInfra` | the same tier — same evidence |
+| `assumes` | task → role | `InfraSpine` | `Certain` — `task_role_arn` is explicit |
+| `can-access` | infra → infra | `InfraSpine` | `Certain` — reversed Terraform dependency |
+| `can-access` | role → resource | `RoleResource` | `Certain` — an IAM statement |
+
+`runs-as` and `deployed-as` both come out of one image-name match. The image node records
+*what was compared*; the task node is *where the code runs*, and it is the one a chain walks —
+an attacker does not move "into an image", and spending a hop of the 3–4 hop budget on a node no
+scanner reports on would push the flagship chain over the cap.
 
 ### Chain
 An ordered path of hops.
 
 | Field | Type | Notes |
 |---|---|---|
-| `HopCount`, `Priority` | `int` | |
+| `HopCount` | `int` | **Edges traversed**, so a 4-hop chain has five hop rows |
+| `Priority` | `int` | Rank among one traversal's candidates, 1 = read first |
 | `Status` | `ChainStatus` | `Candidate` \| `Asserted` \| `Validated` \| `Rejected` |
 | `MinConfidence` | `Confidence` | **The weakest join in the chain.** See §3. |
+
+### ChainHop
+One position on a chain: the node reached, the edge that reached it, the finding decorating it.
+
+| Field | Type | Notes |
+|---|---|---|
+| `HopOrder` | `int` | Zero-based; hop 0 is the seed |
+| `EdgeId` | `Guid?` | **Null on the seed hop** — it arrived from nowhere |
+| `FindingId` | `Guid?` | **Null when no scanner reported on this node** |
+| `TechniqueId` | `string` | Empty on a candidate; Red fills it |
+| `BlueValidated` | `bool` | False on a candidate; Blue sets it |
+
+> **`finding_id` is nullable, which widens the D2 schema (SEC-20).** A hop is a place on a real
+> edge, and plenty of such places carry no finding — a container image, a task definition, an
+> IAM role nobody wrote a rule about. Requiring one would mean either dropping those hops, which
+> breaks the chain, or inventing one, which fabricates a result. Migration:
+> `MakeChainHopFindingOptional`.
+
+A hop has no node column, by design: the node is `Edge.ToNode`, and the seed node is the first
+edge's `FromNode`. Storing it again would duplicate a join `graph_edges` already holds.
 
 ### Report
 The adjudicated output. `Framing` is always draft-audit, never a verdict (AID-01 §7).
@@ -205,5 +273,42 @@ the reverse of what you want — the ordering should be free to change and the *
 - [ ] Every edge carries a `Seam` and a `Confidence`.
 - [ ] An unconfirmable join is `Unresolved`, not dropped and not `Certain`.
 - [ ] Chain confidence computed with `.Weakest()`, never assigned by hand.
+- [ ] If it emits a new node grain, `GraphDecorator` has a rule that joins findings to it.
 
-Tests: `tests/SentinelAI.Domain.Tests/NodeIdTests.cs` and `DebateContractTests.cs`.
+Tests: `tests/SentinelAI.Domain.Tests/NodeIdTests.cs`, `DebateContractTests.cs` and
+`AttackTacticTests.cs`.
+
+---
+
+## 6. Bounded chaining (SEC-20)
+
+`ExploitChainTraverser` turns the decorated graph into the candidate set the debate reasons
+inside. Four bounds, each closing a different failure:
+
+| Bound | Rule | Without it |
+|---|---|---|
+| Hot seeds | a walk starts only at a node a severity ≥ 3 finding landed on | every node is a start; the candidate set *is* the graph |
+| Hop cap | ≤ 4 edges (AID-01 §3.2's "3–4 hops") | search is unbounded in a dense graph |
+| Cross-layer | ≥ 2 distinct layers | a "chain" that is one finding with extra steps |
+| Tactic order | a step may not move backwards along the ATT&CK ladder | reversal artifacts become plausible-reading nonsense |
+
+The tactic ladder is `AttackTactic`, ordered by ATT&CK's own `TA` ids:
+
+```
+Pkg → InitialAccess (TA0001)  <  Code, Image → Execution (TA0002)
+     <  Task → Persistence (TA0003)  <  IamRole → PrivilegeEscalation (TA0004)
+     <  Resource → Collection (TA0009)
+```
+
+This is what discards the `iam_role → task` edges the infra spine produces by blanket-reversing
+Terraform's dependency graph. Those are *real* edges pointing the wrong way for an attacker; the
+correctly-oriented `task → role` `assumes` edge is read separately from the task definition's own
+role reference, and SEC-17's reversal is left exactly as written.
+
+Ranking, in order: chains reaching a crown-jewel `Resource`; then strongest weakest-link; then
+finding severity; then fewer hops; then node keys, so the order is total and two runs over one
+graph produce the same list. Only maximal paths survive — a path another path continues is
+dropped.
+
+Everything a traversal produces is `ChainStatus.Candidate`. It found a path; it did not assert
+an attack.

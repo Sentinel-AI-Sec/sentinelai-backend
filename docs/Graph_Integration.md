@@ -95,8 +95,16 @@ A real repository's graph will not fit in a prompt. AID-01 §3.2 already answers
 > findings … The Red agent reasons within deterministically-generated candidates (real
 > edges only) rather than over the free graph.
 
-Not built. It is the piece that keeps this from falling over on anything larger than the
-fixture, and it belongs on the graph side of the seam, not in the agents.
+**Built — SEC-20.** `ExploitChainTraverser` (Application) generates them; `CandidateChainWriter`
+persists them as `chains`/`chain_hops` and returns the typed `CandidateChain` list for the
+handoff. It sits on the graph side of the seam, as this section asked. The bounds, the ATT&CK
+tactic ordering that constrains direction, and the ranking are documented in
+`Data_Contracts.md` §6.
+
+What remains for the debate side: `ScanBrief` still carries a rendered string, and
+`ScanBriefRenderer` still renders nodes with an explicit "no edges were extracted" line. Feeding
+it candidate chains instead of a bare node list is the next step, and it is the natural moment
+to also do §3.3 — hand Blue the graph as ground truth separately from Red's claim.
 
 ---
 

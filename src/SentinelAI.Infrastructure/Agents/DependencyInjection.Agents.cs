@@ -1,7 +1,10 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using SentinelAI.Application.Abstractions;
 using SentinelAI.Application.Debate;
+using SentinelAI.Application.Features.Scan.Security;
+using SentinelAI.Domain.Abstractions;
 using SentinelAI.Infrastructure.Agents.Orchestration;
 using SentinelAI.Infrastructure.Agents.Providers;
 
@@ -46,7 +49,15 @@ public static class AgentsDependencyInjection
         // built per scan, so a scoped factory would rebuild those connections every request.
         services.AddSingleton<IChatClientFactory>(_ => new ChatClientFactory(models));
 
-        services.AddSingleton<IDebateEngine, DebateEngine>();
+        // SEC-33: nothing resolves the bare engine — IDebateEngine is the redacting wrapper, so
+        // the last thing between a brief and a model provider is always a secret scan. Wrapping
+        // at registration rather than asking callers to remember is the whole point: a guard you
+        // have to opt into is a guard someone eventually forgets.
+        services.AddSingleton<DebateEngine>();
+        services.AddSingleton<IDebateEngine>(sp => new RedactingDebateEngine(
+            sp.GetRequiredService<DebateEngine>(),
+            sp.GetRequiredService<ISecretScanner>(),
+            sp.GetRequiredService<ILogger<RedactingDebateEngine>>()));
 
         return services;
     }

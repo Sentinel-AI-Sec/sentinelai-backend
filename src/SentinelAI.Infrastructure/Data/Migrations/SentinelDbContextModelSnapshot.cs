@@ -72,7 +72,7 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.Property<Guid?>("EdgeId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("FindingId")
+                    b.Property<Guid?>("FindingId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("HopOrder")
@@ -1043,8 +1043,7 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.HasOne("SentinelAI.Domain.Models.Finding", "Finding")
                         .WithMany("ChainHops")
                         .HasForeignKey("FindingId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Chain");
 
