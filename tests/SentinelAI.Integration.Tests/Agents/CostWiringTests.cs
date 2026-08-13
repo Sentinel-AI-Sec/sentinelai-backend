@@ -20,11 +20,19 @@ namespace SentinelAI.Integration.Tests.Agents;
 /// </remarks>
 public class CostWiringTests
 {
+    /// <remarks>
+    /// <see cref="LoggingServiceCollectionExtensions.AddLogging(IServiceCollection)"/> is here
+    /// because a bare <see cref="ServiceCollection"/> has no <c>ILogger&lt;T&gt;</c> and the
+    /// decorated engine takes one. Every real host registers logging before it registers
+    /// anything else, so requiring it is not a gap in <c>AddDebateServices</c> — but leaving it
+    /// out here makes this test fail for a reason that has nothing to do with the price list.
+    /// </remarks>
     private static ServiceProvider Build(Dictionary<string, string?> settings)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
 
         return new ServiceCollection()
+            .AddLogging()
             .AddDebateServices(configuration)
             .BuildServiceProvider();
     }

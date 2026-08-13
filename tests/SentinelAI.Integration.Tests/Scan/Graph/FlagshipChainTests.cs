@@ -27,6 +27,15 @@ namespace SentinelAI.Integration.Tests.Scan.Graph;
 /// (<c>sentinelai-fixtures</c>), trimmed to the blocks that carry the chain. Rewriting them to
 /// something tidier would make this test pass on a graph the product never sees.
 /// </para>
+/// <para>
+/// <b>These are copies, and a copy can drift from what it copies.</b> For one sprint this file's
+/// Dockerfile carried <c>LABEL org.sentinelai.image</c> while the fixture's did not: this test
+/// asserted the flagship chain end to end and passed, while the committed fixture produced seven
+/// two-node candidates and no flagship. The label is in the fixture now, but the hazard is
+/// structural — nothing here reads a fixture file from disk, so every constant below is a
+/// snapshot that only a human keeps in step. Prefer adding a from-disk assertion over adding a
+/// constant when covering something new.
+/// </para>
 /// </remarks>
 public class FlagshipChainTests
 {
