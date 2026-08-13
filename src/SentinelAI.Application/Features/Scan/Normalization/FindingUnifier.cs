@@ -33,7 +33,7 @@ public sealed class FindingUnifier
             .ToList();
 
         foreach (var finding in unified)
-            finding.NodeRef = BuildNodeRef(finding);
+            finding.NodeRef = NodeRefFor(finding);
 
         return unified;
     }
@@ -85,7 +85,7 @@ public sealed class FindingUnifier
     /// machines.
     /// </para>
     /// </remarks>
-    private static string BuildNodeRef(Finding finding)
+    public static string NodeRefFor(Finding finding)
     {
         var subject = finding.Location;
 

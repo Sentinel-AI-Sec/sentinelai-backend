@@ -4,6 +4,8 @@ using SentinelAI.Application.Abstractions;
 using SentinelAI.Application.Features.Scan.Commands.RunGraph;
 using SentinelAI.Application.Features.Scan.Graph;
 using SentinelAI.Application.Features.Scan.Normalization;
+using SentinelAI.Application.Features.Scan.Security;
+using SentinelAI.Infrastructure.Security;
 using SentinelAI.Integration.Tests.Scan.Graph;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
@@ -55,11 +57,14 @@ public class RunGraphStageCommandHandlerTests
                 unitOfWork, NullLogger<CandidateChainWriter>.Instance),
             NullLogger<GraphStagePipeline>.Instance);
 
+        var gate = new IngressRedactionGate(
+            new RegexSecretScanner(), store, NullLogger<IngressRedactionGate>.Instance);
+
         var findingWriter = new NormalizedFindingWriter(
             unitOfWork, NullLogger<NormalizedFindingWriter>.Instance);
 
         return new RunGraphStageCommandHandler(
-            unitOfWork, caller, normalization, findingWriter, graphStage,
+            unitOfWork, caller, normalization, gate, findingWriter, graphStage,
             NullLogger<RunGraphStageCommandHandler>.Instance);
     }
 
@@ -185,6 +190,65 @@ public class RunGraphStageCommandHandlerTests
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         Assert.Equal(ScanStatus.Failed, job.Status);
         Assert.NotNull(job.FailureReason);
+    }
+
+    /// <summary>
+    /// SEC-33 in the real pipeline: the gate runs inside this handler, so a bundle carrying a
+    /// hardcoded credential comes out of the stage redacted, flagged, and reported.
+    /// </summary>
+    [Fact]
+    public async Task A_successful_run_applies_the_ingress_gate_and_records_it()
+    {
+        var (unitOfWork, job) = SeededJob();
+        var caller = new FakeCallerContext { TenantId = Tenant, Scopes = [AuthScopes.ScanWrite] };
+
+        // The reference fixture's INFRA-07: a key baked into the image via ENV.
+        var store = new FakeGraphInputsStore
+        {
+            Files = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["graph-inputs/Dockerfile"] =
+                    "FROM base\nENV ORDER_SVC_API_KEY=\"demo-fixture-dummy-key-not-real-000111\"\n",
+            },
+        };
+
+        var response = await Handler(unitOfWork, caller, store)
+            .Handle(new RunGraphStageCommand(job.Id), CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        // The auditable claim: scan_bundles.ingress_redaction_applied.
+        var bundle = Assert.Single(unitOfWork.FakeRepository<ScanBundle>().Added);
+        Assert.True(bundle.IngressRedactionApplied);
+        Assert.Contains(bundle, unitOfWork.FakeRepository<ScanBundle>().Updated);
+
+        // The customer-facing half: the credential is reported, at the top severity.
+        var secret = Assert.Single(unitOfWork.FakeRepository<Finding>().Added);
+        Assert.Equal(ScannerNames.IngressGate, secret.SourceTool);
+        Assert.Equal(IngressRedactionGate.HardcodedSecretCwe, secret.CweId);
+        Assert.Equal(IngressRedactionGate.SecretSeverity, secret.Severity);
+        Assert.True(secret.Redacted);
+        Assert.DoesNotContain(
+            "demo-fixture-dummy-key-not-real-000111", secret.Message, StringComparison.Ordinal);
+
+        var data = Assert.IsType<RunGraphStageResponse>(response.Data);
+        Assert.Equal(1, data.HardcodedSecrets);
+    }
+
+    /// <summary>
+    /// The flag records that the gate ran, not that it found something — <c>false</c> has to
+    /// keep meaning "nobody looked", or it proves nothing.
+    /// </summary>
+    [Fact]
+    public async Task The_redaction_flag_is_set_even_when_the_bundle_is_clean()
+    {
+        var (unitOfWork, job) = SeededJob();
+        var caller = new FakeCallerContext { TenantId = Tenant, Scopes = [AuthScopes.ScanWrite] };
+
+        await Handler(unitOfWork, caller, new FakeGraphInputsStore { Files = new() })
+            .Handle(new RunGraphStageCommand(job.Id), CancellationToken.None);
+
+        Assert.True(Assert.Single(unitOfWork.FakeRepository<ScanBundle>().Added).IngressRedactionApplied);
     }
 
     private sealed class StubScanJobRepository(ScanJob job) : IScanJobRepository

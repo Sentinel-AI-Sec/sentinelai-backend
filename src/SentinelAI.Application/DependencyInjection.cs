@@ -28,6 +28,11 @@ public static class DependencyInjection
         // SEC-16: the unify step that closes that stage. Pure — no port to supply.
         services.AddScoped<Features.Scan.Normalization.FindingUnifier>();
 
+        // SEC-33: the ingress gate. Runs between normalization and everything that could send
+        // content anywhere. Its ISecretScanner is supplied by Infrastructure, and IDebateEngine
+        // is additionally wrapped there so the model boundary itself is guarded.
+        services.AddScoped<Features.Scan.Security.IngressRedactionGate>();
+
         // SEC-17: the infra spine. Its IInfraSpineReader (the Terraform DOT/HCL reader) is
         // supplied by Infrastructure; this class owns the upsert against the DB.
         services.AddScoped<Features.Scan.Graph.InfraSpineWriter>();

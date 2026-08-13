@@ -3,6 +3,7 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using SentinelAI.Application.Features.Scan.Graph;
 using SentinelAI.Application.Features.Scan.Normalization;
+using SentinelAI.Application.Features.Scan.Security;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
 using SentinelAI.Domain.Enums;
@@ -18,6 +19,7 @@ public class RunGraphStageCommandHandler(
     IUnitOfWork unitOfWork,
     ICallerContext caller,
     NormalizationPipeline normalization,
+    IngressRedactionGate gate,
     NormalizedFindingWriter findingWriter,
     GraphStagePipeline graphStage,
     ILogger<RunGraphStageCommandHandler> logger)
@@ -50,7 +52,16 @@ public class RunGraphStageCommandHandler(
 
         try
         {
-            var findings = await normalization.NormalizeAsync(bundle.StorageLocator, tenantId, job.Id, ct);
+            var normalized = await normalization.NormalizeAsync(bundle.StorageLocator, tenantId, job.Id, ct);
+
+            // SEC-33: the gate sits exactly here. The findings now exist as text, and nothing has
+            // yet persisted them, rendered them into a brief, or sent them anywhere. Its output —
+            // redacted findings plus any hardcoded secret it raised — is what continues; the
+            // normalizer's list is deliberately not used again below.
+            var gated = await gate.ApplyAsync(bundle.StorageLocator, normalized, tenantId, job.Id, ct);
+            var findings = gated.Findings;
+
+            await MarkRedactionAppliedAsync(bundle);
 
             // Before the graph, not after: a chain hop's finding_id is a foreign key, so the
             // findings have to be rows by the time the chains are written.
@@ -61,7 +72,7 @@ public class RunGraphStageCommandHandler(
             await AdvanceStageAsync(job, ScanStage.Graph, failure: null);
 
             return await Response.SuccessAsync(
-                RunGraphStageResponse.From(job.Id, findings, result),
+                RunGraphStageResponse.From(job.Id, findings, gated, result),
                 "graph stage complete",
                 HttpStatusCode.OK);
         }
@@ -103,6 +114,30 @@ public class RunGraphStageCommandHandler(
     }
 
     /// <summary>
+    /// Records on the bundle that the ingress gate ran (SEC-33).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Set whenever the gate completed, not only when it found something. The column is
+    /// documented as "proof the backend redacted before any LLM call", and the auditable claim
+    /// is that the check happened — a clean bundle and an unchecked one are not the same fact,
+    /// and <c>false</c> has to keep meaning "nobody looked".
+    /// </para>
+    /// <para>
+    /// Written before the graph stage rather than after it, so a job that dies in traversal
+    /// still carries the truth about what was scanned.
+    /// </para>
+    /// </remarks>
+    private async Task MarkRedactionAppliedAsync(ScanBundle bundle)
+    {
+        if (bundle.IngressRedactionApplied) return;
+
+        bundle.IngressRedactionApplied = true;
+        await unitOfWork.Repository<ScanBundle>().UpdateAsync(bundle);
+        await unitOfWork.CompleteAsync();
+    }
+
+    /// <summary>
     /// Records where the job got to. The repository reads jobs untracked, so this attaches the
     /// row explicitly rather than relying on change tracking.
     /// </summary>
@@ -125,6 +160,12 @@ public sealed record RunGraphStageResponse
 {
     public required string ScanJobId { get; init; }
     public required int Findings { get; init; }
+
+    /// <summary>SEC-33: how many finding messages had a credential removed at ingress.</summary>
+    public required int MessagesRedacted { get; init; }
+
+    /// <summary>SEC-33: hardcoded credentials found in the bundle's own artifacts.</summary>
+    public required int HardcodedSecrets { get; init; }
     public required int TerraformFiles { get; init; }
     public required int LockFiles { get; init; }
     public required int Dockerfiles { get; init; }
@@ -140,10 +181,15 @@ public sealed record RunGraphStageResponse
         + "Nothing here is an asserted or validated attack path — that is the debate's job.";
 
     public static RunGraphStageResponse From(
-        Guid scanJobId, IReadOnlyList<Finding> findings, GraphStageResult result) => new()
+        Guid scanJobId,
+        IReadOnlyList<Finding> findings,
+        IngressRedactionResult redaction,
+        GraphStageResult result) => new()
         {
             ScanJobId = scanJobId.ToString(),
             Findings = findings.Count,
+            MessagesRedacted = redaction.MessagesRedacted,
+            HardcodedSecrets = redaction.ArtifactSecrets,
             TerraformFiles = result.TerraformFileCount,
             LockFiles = result.LockFileCount,
             Dockerfiles = result.DockerfileCount,

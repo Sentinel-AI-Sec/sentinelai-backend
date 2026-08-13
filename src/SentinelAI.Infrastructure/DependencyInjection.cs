@@ -11,6 +11,7 @@ using SentinelAI.Infrastructure.Knowledge;
 using SentinelAI.Infrastructure.Implementation;
 using SentinelAI.Infrastructure.Implementation.Repositories;
 using SentinelAI.Infrastructure.Normalization;
+using SentinelAI.Infrastructure.Security;
 
 namespace SentinelAI.Infrastructure;
 
@@ -54,6 +55,12 @@ public static class DependencyInjection
 
         // ---- SEC-20: placing infra findings on the resource they are about ----------------
         services.AddScoped<IInfraFindingLocator, TerraformFindingLocator>();
+
+        // ---- SEC-33: the ingress secret gate ----------------------------------------------
+        // Singleton and stateless: the compiled patterns are expensive to build and safe to
+        // share, and the scanner holds nothing between calls by design — it never retains the
+        // text it was given.
+        services.AddSingleton<ISecretScanner, RegexSecretScanner>();
 
         // ---- SEC-45: knowledge retrieval -------------------------------------------------
         // A canned-answer stub so the walking skeleton can cross the retrieval seam before the
