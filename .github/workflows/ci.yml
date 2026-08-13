@@ -83,6 +83,19 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      # `dotnet ef` builds the project to read its model, and a build needs the assets file
+      # restore produces. Without this the job fails on a clean checkout with NETSDK1004 —
+      # invisible on a developer machine, where obj/ is already populated from earlier builds.
+      - name: Restore
+        run: dotnet restore SentinelAI.slnx
+
       - name: Install EF tools
         run: dotnet tool install --global dotnet-ef
 
