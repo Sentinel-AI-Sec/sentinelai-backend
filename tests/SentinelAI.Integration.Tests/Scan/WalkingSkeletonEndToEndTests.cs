@@ -5,6 +5,7 @@ using SentinelAI.Application.Debate;
 using SentinelAI.Application.Features.Scan.Graph;
 using SentinelAI.Application.Features.Scan.Normalization;
 using SentinelAI.Application.Features.Scan.Reporting;
+using SentinelAI.Application.Features.Scan.Retrieval;
 using SentinelAI.Application.Features.Scan.ThinSlice;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
@@ -54,6 +55,7 @@ public class WalkingSkeletonEndToEndTests
 
     private static ThinSlicePipeline Build() =>
         new(new GraphSeeder(),
+            new RetrievalQueryBuilder(),
             new SeedKnowledgeRetriever(NullLogger<SeedKnowledgeRetriever>.Instance),
             new ScanBriefRenderer(),
             RealDebateOffline(),

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SentinelAI.Application.Abstractions;
+using SentinelAI.Application.Features.Scan.Security;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
 using SentinelAI.Infrastructure.Agents;
@@ -61,6 +62,13 @@ public static class DependencyInjection
         // share, and the scanner holds nothing between calls by design — it never retains the
         // text it was given.
         services.AddSingleton<ISecretScanner, RegexSecretScanner>();
+
+        // ---- SEC-34: the egress allowlist and what this deployment is configured to call --
+        // Both singletons and both read once: the allowlist is compiled-in vendor hosts plus
+        // whatever Security:Egress adds, and the catalog is a snapshot of the endpoints
+        // configuration names. EgressAdmission (Application) compares them on every submit.
+        services.AddSingleton(_ => EgressPolicyLoader.Load(configuration));
+        services.AddSingleton<IOutboundEndpointCatalog>(_ => new ConfiguredOutboundEndpoints(configuration));
 
         // ---- SEC-45: knowledge retrieval -------------------------------------------------
         // A canned-answer stub so the walking skeleton can cross the retrieval seam before the

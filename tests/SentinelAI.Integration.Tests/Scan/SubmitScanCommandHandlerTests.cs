@@ -26,7 +26,8 @@ public class SubmitScanCommandHandlerTests
         var corpus = new FakeCorpusVersionProvider();
         var caller = new FakeCallerContext { TenantId = TenantId };
 
-        var handler = new SubmitScanCommandHandler(unitOfWork, inspector, store, corpus, caller);
+        var handler = new SubmitScanCommandHandler(
+            unitOfWork, inspector, store, corpus, caller, FakeEgress.Offline());
         return (handler, unitOfWork, store);
     }
 

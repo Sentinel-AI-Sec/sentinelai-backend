@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using SentinelAI.Application.Abstractions;
 using SentinelAI.Application.Features.Scan.Graph;
 using SentinelAI.Application.Features.Scan.Reporting;
+using SentinelAI.Application.Features.Scan.Retrieval;
 using SentinelAI.Domain.Models;
 
 namespace SentinelAI.Application.Features.Scan.ThinSlice;
@@ -27,6 +28,7 @@ namespace SentinelAI.Application.Features.Scan.ThinSlice;
 /// </remarks>
 public sealed class ThinSlicePipeline(
     GraphSeeder graphSeeder,
+    RetrievalQueryBuilder queryBuilder,
     IKnowledgeRetriever retriever,
     ScanBriefRenderer briefRenderer,
     IDebateEngine debate,
@@ -48,20 +50,28 @@ public sealed class ThinSlicePipeline(
     /// findings" — see <see cref="GraphFor"/>, which is where the difference between the two
     /// callers of this pipeline lives.
     /// </param>
+    /// <param name="candidates">
+    /// The candidate chains SEC-20's traverser found over that graph, when it has run. Null or
+    /// empty produces an empty <see cref="AttackGraphHandoff"/> rather than none — the walking
+    /// skeleton has no edges and therefore no paths, and "no candidates" is a fact the later
+    /// stages should read, not a null they should guard.
+    /// </param>
     public async Task<ThinSliceResult> RunAsync(
         IReadOnlyList<Finding> findings,
         Guid tenantId,
         Guid scanJobId,
         IReadOnlyList<GraphNode>? graph = null,
+        IReadOnlyList<CandidateChain>? candidates = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(findings);
 
         // ---- Stage 2: graph ---------------------------------------------------------------
         var nodes = GraphFor(findings, graph, tenantId, scanJobId);
+        var handoff = AttackGraphHandoff.From(tenantId, scanJobId, candidates ?? []);
 
         // ---- Stage 3: retrieve ------------------------------------------------------------
-        var knowledge = await RetrieveAsync(findings, ct);
+        var knowledge = await RetrieveAsync(findings, handoff, ct);
 
         // ---- Stage 4: debate --------------------------------------------------------------
         var brief = briefRenderer.Render(scanJobId, findings, nodes, knowledge);
@@ -73,15 +83,16 @@ public sealed class ThinSlicePipeline(
 
         logger.LogInformation(
             "Thin slice for job {JobId}: {Findings} finding(s) -> {Nodes} node(s) -> "
-            + "{Chunks} knowledge chunk(s) -> debate {Outcome} in {Rounds} round(s) -> "
-            + "report with {Citations} citation(s)",
-            scanJobId, findings.Count, nodes.Count, knowledge.Count,
+            + "{Candidates} candidate chain(s) -> {Chunks} knowledge chunk(s) -> debate {Outcome} "
+            + "in {Rounds} round(s) -> report with {Citations} citation(s)",
+            scanJobId, findings.Count, nodes.Count, handoff.Candidates.Count, knowledge.Count,
             audit.Outcome, audit.Rounds, report.Citations.Count);
 
         return new ThinSliceResult
         {
             Findings = findings,
             Nodes = nodes,
+            Handoff = handoff,
             Knowledge = knowledge,
             Brief = brief,
             Audit = audit,
@@ -129,31 +140,31 @@ public sealed class ThinSlicePipeline(
     }
 
     /// <summary>
-    /// One retrieval per linking key on the most severe findings, de-duplicated.
+    /// One retrieval per seeded finding, de-duplicated on the query text.
     /// </summary>
     /// <remarks>
-    /// Queries are built from the linking key plus the message, not from the message alone: the
-    /// id is what the corpus can match exactly, and the prose is what makes a meaning-based
-    /// search useful once there is one. A finding with neither a CWE nor a CVE is skipped — it
-    /// has nothing the corpus can be keyed on, which is the gap SEC-15's table exists to close.
+    /// The queries come from <see cref="RetrievalQueryBuilder"/> (SEC-21), which is what keeps the
+    /// scanner's own scaffolding out of the corpus search; this method owns only which findings
+    /// get one and what is done with the answers. A finding the builder returns null for is
+    /// skipped and counted — it has nothing the corpus can be keyed on, which is the gap SEC-15's
+    /// table exists to close.
     /// </remarks>
     private async Task<IReadOnlyList<string>> RetrieveAsync(
-        IReadOnlyList<Finding> findings, CancellationToken ct)
+        IReadOnlyList<Finding> findings, AttackGraphHandoff handoff, CancellationToken ct)
     {
         var chunks = new List<string>();
         var seenQueries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var unlinked = 0;
 
-        foreach (var finding in findings.OrderByDescending(f => f.Severity).Take(RetrievalSeedCount))
+        foreach (var finding in Seeds(findings, handoff))
         {
-            var key = finding.CweId ?? finding.CveId;
-            if (key is null)
+            var query = queryBuilder.Build(finding);
+            if (query is null)
             {
                 unlinked++;
                 continue;
             }
 
-            var query = $"{key} {finding.Message}";
             if (!seenQueries.Add(query))
                 continue;
 
@@ -171,4 +182,22 @@ public sealed class ThinSlicePipeline(
 
         return chunks;
     }
+
+    /// <summary>
+    /// The findings worth spending the <see cref="RetrievalSeedCount"/> retrievals on: the ones on
+    /// a candidate attack path first, then the rest by severity.
+    /// </summary>
+    /// <remarks>
+    /// A severity-4 finding sitting on no path and a severity-4 finding two hops from the crown
+    /// jewel are not equally worth retrieving for — the debate reasons inside the candidates, so
+    /// knowledge about a finding on one of them is knowledge it can use. The tail is kept rather
+    /// than discarded because a scan with no chains at all (no edges extracted, or none that
+    /// crossed a layer) would otherwise retrieve nothing and produce a report with no citations,
+    /// which reads exactly like a clean scan.
+    /// </remarks>
+    private static IEnumerable<Finding> Seeds(IReadOnlyList<Finding> findings, AttackGraphHandoff handoff) =>
+        handoff.Findings
+            .Concat(findings.OrderByDescending(f => f.Severity))
+            .Distinct()
+            .Take(RetrievalSeedCount);
 }

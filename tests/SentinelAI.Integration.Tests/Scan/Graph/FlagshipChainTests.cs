@@ -355,6 +355,15 @@ public class FlagshipChainTests
     /// dropped, so any chain through it is <c>Unresolved</c> — "potential chain, unverified
     /// join", never a confirmed result.
     /// </summary>
+    /// <remarks>
+    /// The image below is written <c>image = var.legacy_worker_image</c> — bare, exactly as
+    /// <c>sentinelai-fixtures/infra/main.tf</c> writes it. It used to be quoted here
+    /// (<c>"${var.legacy_worker_image}"</c>), and that one pair of quotes is the whole of finding
+    /// 19-B: the extractor's regex accepted only quoted values, so this test matched and passed
+    /// while the real fixture's legacy task was dropped from the extractor's output entirely —
+    /// not recorded as unresolved, simply gone. The tier this test exists to prove was
+    /// unreachable in production for a sprint, and the copy is why nobody could see it.
+    /// </remarks>
     [Fact]
     public async Task The_deliberately_ambiguous_join_produces_an_unresolved_chain_not_a_missing_one()
     {
@@ -370,7 +379,7 @@ public class FlagshipChainTests
               task_role_arn = aws_iam_role.legacy_worker_role.arn
 
               container_definitions = jsonencode([
-                { name = "legacy-worker", image = "${var.legacy_worker_image}" }
+                { name = "legacy-worker", image = var.legacy_worker_image }
               ])
             }
 
