@@ -34,7 +34,9 @@ namespace SentinelAI.Infrastructure.Graph;
 /// One edge is not derived from the reversed graph: <c>task → role</c> (<c>assumes</c>), read
 /// from the task definition's own role reference by <see cref="TaskDefinitionRoleExtractor"/>.
 /// Added for SEC-20, which cannot reach the flagship chain's IAM hop without it — see
-/// <see cref="AddAssumesEdges"/> and that extractor's remarks.
+/// <see cref="BuildAssumesEdges"/> and that extractor's remarks. That relation <em>owns</em> the
+/// task↔role direction: the reversal's mirror-image <c>role → task</c> edge is suppressed rather
+/// than emitted alongside it, for the reason given on <see cref="BuildAssumesEdges"/>.
 /// </para>
 /// </summary>
 public sealed class TerraformInfraSpineReader(ILogger<TerraformInfraSpineReader> logger) : IInfraSpineReader
@@ -51,7 +53,9 @@ public sealed class TerraformInfraSpineReader(ILogger<TerraformInfraSpineReader>
     /// <summary>
     /// The relation for the one edge this reader does <em>not</em> derive by reversal: a task
     /// definition assuming its IAM role. See <see cref="TaskDefinitionRoleExtractor"/> for why
-    /// that edge is read from the reference itself rather than taken from the reversed graph.
+    /// that edge is read from the reference itself rather than taken from the reversed graph, and
+    /// <see cref="BuildAssumesEdges"/> for why it displaces the reversed edge instead of sitting
+    /// beside it.
     /// </summary>
     private const string AssumesRelation = "assumes";
 
@@ -115,8 +119,12 @@ public sealed class TerraformInfraSpineReader(ILogger<TerraformInfraSpineReader>
             nodesByKey[nodeKey] = graphNode;
         }
 
-        var edges = new List<InfraSpineEdge>();
-        var seenEdges = new HashSet<(string From, string To)>();
+        // The assumes edges are built *before* the reversal edges rather than appended after,
+        // because each one decides whether a reversal edge may exist at all: see
+        // BuildAssumesEdges for the contradiction this ordering exists to prevent.
+        var edges = BuildAssumesEdges(input.HclFiles, nodeKeyByAddress, scanJobId);
+        var seenEdges = new HashSet<(string From, string To)>(edges.Select(e => (e.FromNodeKey, e.ToNodeKey)));
+        var claimedByAssumes = new HashSet<(string From, string To)>(edges.Select(e => (e.ToNodeKey, e.FromNodeKey)));
 
         foreach (var edge in orientedEdges)
         {
@@ -125,26 +133,70 @@ public sealed class TerraformInfraSpineReader(ILogger<TerraformInfraSpineReader>
             // provider node was in step 1.
             if (!nodeKeyByAddress.TryGetValue(edge.FromAddress, out var fromKey)) continue;
             if (!nodeKeyByAddress.TryGetValue(edge.ToAddress, out var toKey)) continue;
+
+            if (claimedByAssumes.Contains((fromKey, toKey)))
+            {
+                // Not a dropped signal — the same dependency, already recorded by the edge that
+                // states its direction from the reference rather than by reversing it.
+                logger.LogDebug(
+                    "Dropping the reversal-derived edge {From} -> {To} for scan job {ScanJobId}: an " +
+                    "assumes edge already owns this pair in the opposite direction",
+                    fromKey, toKey, scanJobId);
+                continue;
+            }
+
             if (!seenEdges.Add((fromKey, toKey))) continue;
 
             edges.Add(new InfraSpineEdge(fromKey, toKey, Relation, edge.OrientedAttackDir));
         }
 
-        AddAssumesEdges(input.HclFiles, nodeKeyByAddress, edges, seenEdges, scanJobId);
-
         return new InfraSpineReadResult([.. nodesByKey.Values], edges, usedHclFallback);
     }
 
     /// <summary>
-    /// Adds a <c>task → role</c> <c>assumes</c> edge for every task definition that names an
-    /// IAM role literally.
+    /// Builds a <c>task → role</c> <c>assumes</c> edge for every task definition that names an
+    /// IAM role literally. These are the first edges in the returned list, and every pair one of
+    /// them claims is closed to the reversal loop in <see cref="Read"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Runs on both the DOT and the HCL-fallback path, and reads the <c>.tf</c> source either
     /// way, because the DOT graph records that the dependency exists but not that it is a role
     /// attachment — and the direction only follows from knowing that. Nothing is added when the
     /// bundle carried no HCL, which is the same degraded-but-honest outcome the rest of this
     /// reader gives: fewer edges, never invented ones.
+    /// </para>
+    /// <para>
+    /// <b>Why <c>assumes</c> owns the task↔role direction outright, and the reversal's mirror
+    /// image is suppressed.</b> Both edges used to be emitted, on the argument that the reversal
+    /// was left exactly as SEC-17 wrote it and the ATT&amp;CK tactic ordering in traversal would
+    /// discard the backwards one. Measured on the real fixture that produced
+    /// <c>iam_role:order_task_role --can-access--&gt; task:order_task</c> and
+    /// <c>task:order_task --assumes--&gt; iam_role:order_task_role</c>, both
+    /// <see cref="Confidence.Certain"/>, and the same pair again for <c>legacy_worker</c>. In a
+    /// graph whose entire premise is that an edge encodes attack direction, two certain edges
+    /// pointing opposite ways between one pair is not redundancy, it is the graph asserting a
+    /// thing and its negation. Relying on a downstream filter to pick the right one means the
+    /// contradiction is stored, exported, and true for every consumer that is not the traverser
+    /// — and it makes a two-node cycle out of the one hop the flagship chain runs through.
+    /// </para>
+    /// <para>
+    /// <c>assumes</c> is the survivor because it is the only one of the two that describes a
+    /// move: compromise a task, assume the role it carries, act with that role's permissions.
+    /// <c>role → task</c> is not a claim about attackers at all — it is the mechanical reversal
+    /// of Terraform's "the task cannot be created before the role exists", a build-order fact
+    /// that <see cref="AttackDirectionOrienter"/> flips because flipping is right for the
+    /// resource pairs it was written against. Holding a role does not by itself put an attacker
+    /// inside a task definition; something else has to run there first.
+    /// </para>
+    /// <para>
+    /// The suppression is deliberately narrow: it removes only the exact mirror of an edge this
+    /// method emitted, so a reversal edge with no <c>assumes</c> counterpart is untouched and the
+    /// orienter's blanket reversal — and its standing regression test against the zero-chains bug
+    /// — keeps working unchanged. <c>GraphEdgeContradictionTests</c> asserts the resulting
+    /// invariant over the whole combined edge set, which is where the next such collision (from a
+    /// seam that does not exist yet) would show up.
+    /// </para>
     /// <para>
     /// Both endpoints are resolved through <paramref name="nodeKeyByAddress"/> rather than
     /// rebuilt with <see cref="NodeId"/>, so an edge is only emitted between nodes this reader
@@ -152,13 +204,13 @@ public sealed class TerraformInfraSpineReader(ILogger<TerraformInfraSpineReader>
     /// see) is skipped rather than joined to the wrong node key.
     /// </para>
     /// </remarks>
-    private void AddAssumesEdges(
+    private List<InfraSpineEdge> BuildAssumesEdges(
         IReadOnlyDictionary<string, string> hclFiles,
         IReadOnlyDictionary<string, string> nodeKeyByAddress,
-        List<InfraSpineEdge> edges,
-        HashSet<(string From, string To)> seenEdges,
         Guid scanJobId)
     {
+        var edges = new List<InfraSpineEdge>();
+        var seen = new HashSet<(string From, string To)>();
         var rolesByTaskDefinition = TaskDefinitionRoleExtractor.ExtractRoleNamesByTaskDefinitionName(hclFiles);
 
         foreach (var (taskName, roleNames) in rolesByTaskDefinition)
@@ -175,10 +227,12 @@ public sealed class TerraformInfraSpineReader(ILogger<TerraformInfraSpineReader>
             foreach (var roleName in roleNames)
             {
                 if (!nodeKeyByAddress.TryGetValue($"aws_iam_role.{roleName}", out var roleKey)) continue;
-                if (!seenEdges.Add((taskKey, roleKey))) continue;
+                if (!seen.Add((taskKey, roleKey))) continue;
 
                 edges.Add(new InfraSpineEdge(taskKey, roleKey, AssumesRelation, OrientedAttackDir: true));
             }
         }
+
+        return edges;
     }
 }

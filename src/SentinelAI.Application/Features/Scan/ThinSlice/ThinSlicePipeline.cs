@@ -43,15 +43,22 @@ public sealed class ThinSlicePipeline(
     /// </summary>
     public const int RetrievalSeedCount = 5;
 
+    /// <param name="graph">
+    /// The resource graph to reason over, when one already exists. Null means "seed one from the
+    /// findings" — see <see cref="GraphFor"/>, which is where the difference between the two
+    /// callers of this pipeline lives.
+    /// </param>
     public async Task<ThinSliceResult> RunAsync(
-        IReadOnlyList<Finding> findings, Guid tenantId, Guid scanJobId, CancellationToken ct = default)
+        IReadOnlyList<Finding> findings,
+        Guid tenantId,
+        Guid scanJobId,
+        IReadOnlyList<GraphNode>? graph = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(findings);
 
         // ---- Stage 2: graph ---------------------------------------------------------------
-        // Throws if a finding's node reference is not one NodeId could have produced, rather
-        // than dropping it — a finding that cannot join the graph is invisible from here on.
-        var nodes = graphSeeder.Seed(findings, tenantId, scanJobId);
+        var nodes = GraphFor(findings, graph, tenantId, scanJobId);
 
         // ---- Stage 3: retrieve ------------------------------------------------------------
         var knowledge = await RetrieveAsync(findings, ct);

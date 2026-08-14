@@ -17,9 +17,16 @@ namespace SentinelAI.Infrastructure.Graph;
 /// and reaches the bucket from there. Rather than special-case the orienter — whose blanket
 /// reversal is correct for the resource types it was written against, and whose regression
 /// test is the project's standing guard against the zero-chains bug — the spine emits the
-/// <c>assumes</c> edge explicitly from the reference that creates it. Both edges then exist,
-/// and the ATT&amp;CK tactic ordering in traversal (SEC-20 step 4) is what discards the
-/// backwards one.
+/// <c>assumes</c> edge explicitly from the reference that creates it, and drops the reversed
+/// edge for that same pair.
+/// </para>
+/// <para>
+/// <b>Both edges used to be kept</b>, on the argument that traversal's ATT&amp;CK tactic
+/// ordering discards the backwards one. It does, but only inside the traverser: the stored
+/// graph still held <c>role → task</c> and <c>task → role</c>, both <c>certain</c>, which is a
+/// contradiction for every other consumer and a two-node cycle across the flagship chain's IAM
+/// hop. <c>TerraformInfraSpineReader.BuildAssumesEdges</c> carries the full reasoning for which
+/// direction survives.
 /// </para>
 /// <para>
 /// Literal <c>aws_iam_role.&lt;name&gt;</c> references only, matching
