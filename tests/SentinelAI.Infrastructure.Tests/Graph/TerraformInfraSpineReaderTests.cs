@@ -141,10 +141,16 @@ public class TerraformInfraSpineReaderTests
     /// <summary>
     /// SEC-20's addition. The DOT graph says the task depends on the role, which reverses to
     /// <c>role → task</c>; the attacker moves the other way, and the task definition's own
-    /// <c>task_role_arn</c> is where that direction is stated. Both edges are emitted — the
-    /// reversal is left exactly as SEC-17 wrote it — and the tactic ordering in traversal is
-    /// what discards the backwards one.
+    /// <c>task_role_arn</c> is where that direction is stated. The <c>assumes</c> edge claims
+    /// the pair outright and the reversal's mirror image is <b>suppressed</b>.
     /// </summary>
+    /// <remarks>
+    /// Both used to be emitted, on the argument that traversal's tactic ordering would discard
+    /// the backwards one. That left two <c>Certain</c> edges pointing opposite ways between one
+    /// pair — a stored contradiction, true for every consumer that is not the traverser, and a
+    /// two-node cycle across the hop the flagship chain runs through. Filtering downstream is not
+    /// the same as not asserting it.
+    /// </remarks>
     [Fact]
     public void The_task_role_reference_yields_an_assumes_edge_in_attack_direction()
     {
@@ -171,8 +177,12 @@ public class TerraformInfraSpineReaderTests
         Assert.Equal(roleKey, assumes.ToNodeKey);
         Assert.True(assumes.OrientedAttackDir);
 
-        // The reversal's own edge is untouched and still points the other way.
-        Assert.Contains(result.Edges, e => e.FromNodeKey == roleKey && e.ToNodeKey == taskKey && e.Relation == "can-access");
+        // The reversal's mirror image is not stored beside it — the pair is claimed once.
+        Assert.DoesNotContain(result.Edges, e => e.FromNodeKey == roleKey && e.ToNodeKey == taskKey);
+
+        // Stated generally, so a new relation cannot reintroduce the contradiction unnoticed.
+        var pairs = result.Edges.Select(e => (e.FromNodeKey, e.ToNodeKey)).ToHashSet();
+        Assert.DoesNotContain(pairs, p => pairs.Contains((p.ToNodeKey, p.FromNodeKey)));
     }
 
     /// <summary>

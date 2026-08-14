@@ -406,20 +406,43 @@ public class FlagshipChainTests
     }
 
     /// <summary>
-    /// The infra spine reverses every Terraform dependency, so <c>iam_role → task</c> is a real
-    /// stored edge. It is real and it points the wrong way, and no candidate walks it.
+    /// The graph never stores a task↔role pair in both directions, and therefore no candidate can
+    /// walk the backwards one.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The spine reverses every Terraform dependency, which for <c>task depends on role</c>
+    /// yields <c>role → task</c> — a build-order fact flipped into something that reads as an
+    /// attacker move and is not one. <c>TaskDefinitionRoleExtractor</c> separately emits
+    /// <c>task --assumes--&gt; role</c>, which is the real move. Measured on the fixture, both
+    /// used to be stored, both <see cref="Confidence.Certain"/>, making a two-node cycle out of
+    /// the hop the flagship chain runs through.
+    /// </para>
+    /// <para>
+    /// This asserts the pair is now claimed once, not filtered later. An earlier version of this
+    /// test asserted the opposite — that the reversed edge <em>is</em> stored and traversal
+    /// simply declines to walk it — which left the contradiction in the database for every
+    /// consumer that is not the traverser.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public async Task No_candidate_walks_the_reversal_artifact_backwards()
+    public async Task The_task_role_pair_is_stored_in_one_direction_only()
     {
         var unitOfWork = await BuildGraphAsync();
         var candidates = await TraverseFixtureAsync(unitOfWork);
 
         var nodes = unitOfWork.FakeRepository<GraphNode>().Added.ToDictionary(n => n.NodeKey, StringComparer.Ordinal);
-        Assert.Contains(
-            unitOfWork.FakeRepository<GraphEdge>().Added,
-            e => e.FromNodeId == nodes[RoleKey].Id && e.ToNodeId == nodes[TaskKey].Id);
+        var edges = unitOfWork.FakeRepository<GraphEdge>().Added;
 
+        Assert.Contains(edges, e => e.FromNodeId == nodes[TaskKey].Id && e.ToNodeId == nodes[RoleKey].Id);
+
+        Assert.DoesNotContain(edges, e => e.FromNodeId == nodes[RoleKey].Id && e.ToNodeId == nodes[TaskKey].Id);
+
+        // No pair anywhere in the graph is joined in both directions.
+        var pairs = edges.Select(e => (e.FromNodeId, e.ToNodeId)).ToHashSet();
+        Assert.DoesNotContain(pairs, p => pairs.Contains((p.ToNodeId, p.FromNodeId)));
+
+        // And the traversal, unsurprisingly, cannot walk an edge that does not exist.
         Assert.All(candidates, c => Assert.DoesNotContain(
             c.Hops.Skip(1),
             h => h.EdgeFromPrevious!.FromNodeId == nodes[RoleKey].Id

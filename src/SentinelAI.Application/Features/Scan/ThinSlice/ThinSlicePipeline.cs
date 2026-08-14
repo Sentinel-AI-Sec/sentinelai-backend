@@ -90,6 +90,45 @@ public sealed class ThinSlicePipeline(
     }
 
     /// <summary>
+    /// The node set this run reasons over: the real graph when the caller already built one,
+    /// otherwise a set seeded from the findings themselves.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two callers, two situations. The graph stage (SEC-17→SEC-20) builds a structural graph
+    /// from Terraform, lock files and Dockerfiles, and its nodes are the ones a chain is actually
+    /// traversed over — when that has run, this pipeline must reason over <em>those</em> nodes and
+    /// not invent a second set beside them. The walking skeleton (SEC-45) has no such graph and
+    /// seeds one node per distinct finding reference, which is thin but honest.
+    /// </para>
+    /// <para>
+    /// An empty supplied graph is treated as "no graph", not as "a graph with nothing in it".
+    /// Reasoning over zero nodes produces a brief with no resources in it and a debate about
+    /// nothing, which reads as a clean scan — the zero-chains failure mode wearing a different
+    /// hat. Falling back to the seeder keeps the findings visible.
+    /// </para>
+    /// <para>
+    /// <see cref="GraphSeeder.Seed"/> throws when a finding carries a node reference
+    /// <c>NodeId</c> could not have produced, rather than dropping it: a finding that cannot join
+    /// the graph is invisible to every later stage, and silence is the failure mode SEC-03 exists
+    /// to prevent.
+    /// </para>
+    /// </remarks>
+    private IReadOnlyList<GraphNode> GraphFor(
+        IReadOnlyList<Finding> findings, IReadOnlyList<GraphNode>? graph, Guid tenantId, Guid scanJobId)
+    {
+        if (graph is { Count: > 0 })
+        {
+            logger.LogInformation(
+                "Thin slice for job {JobId} is reasoning over the {Count} node(s) the graph stage "
+                + "built, rather than seeding its own", scanJobId, graph.Count);
+            return graph;
+        }
+
+        return graphSeeder.Seed(findings, tenantId, scanJobId);
+    }
+
+    /// <summary>
     /// One retrieval per linking key on the most severe findings, de-duplicated.
     /// </summary>
     /// <remarks>
