@@ -68,6 +68,9 @@ public sealed record DebateResponse
     public required IReadOnlyList<TurnView> Transcript { get; init; }
     public required string Disclaimer { get; init; }
 
+    /// <summary>What the audit cost, split by model tier (SEC-31).</summary>
+    public required CostView Cost { get; init; }
+
     public static DebateResponse From(ScanBrief brief, DraftAudit audit) =>
         new()
         {
@@ -80,11 +83,46 @@ public sealed record DebateResponse
             Summary = audit.Summary,
             Transcript = [.. audit.Transcript.Select(TurnView.From)],
             Disclaimer = audit.Disclaimer,
+            Cost = CostView.From(audit.Cost),
         };
 
-    public sealed record TurnView(string Role, int Round, string Confidence, string Content)
+    /// <param name="Tier">Which tier the turn was routed to — <c>High</c> or <c>Cheap</c>.</param>
+    public sealed record TurnView(
+        string Role, int Round, string Confidence, string Tier, long Tokens, string Content)
     {
         public static TurnView From(DebateTurn t) =>
-            new(t.Role.ToString(), t.Round, t.Confidence.ToString(), t.Content);
+            new(t.Role.ToString(), t.Round, t.Confidence.ToString(), t.Tier.ToString(),
+                t.Usage.TotalTokens, t.Content);
+    }
+
+    /// <summary>
+    /// The cost figure, flattened for the wire.
+    /// </summary>
+    /// <remarks>
+    /// <c>Rated</c> and <c>Measured</c> are surfaced rather than dropped because a total of
+    /// zero has three different meanings — no model was called, the provider reported no
+    /// usage, or nobody configured a price — and a caller that cannot tell them apart will
+    /// read the third as a free scan.
+    /// </remarks>
+    public sealed record CostView(
+        string Currency,
+        decimal Total,
+        int ModelCalls,
+        long TotalTokens,
+        bool Rated,
+        bool Measured,
+        IReadOnlyList<TierView> ByTier)
+    {
+        public static CostView From(AuditCost cost) =>
+            new(cost.Currency, cost.Total, cost.TotalCalls, cost.TotalUsage.TotalTokens,
+                cost.FullyRated, cost.Measured, [.. cost.ByTier.Select(TierView.From)]);
+    }
+
+    public sealed record TierView(
+        string Tier, int Calls, long InputTokens, long OutputTokens, decimal Cost, bool Rated)
+    {
+        public static TierView From(TierSpend s) =>
+            new(s.Tier.ToString(), s.Calls, s.Usage.InputTokens, s.Usage.OutputTokens,
+                s.Cost, s.Rated);
     }
 }

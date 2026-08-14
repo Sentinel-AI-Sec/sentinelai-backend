@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using MediatR;
+using SentinelAI.Application.Features.Scan.Security;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
 using SentinelAI.Domain.Enums;
@@ -14,7 +15,8 @@ public class SubmitScanCommandHandler(
     IBundleInspector inspector,
     IBundleStore store,
     ICorpusVersionProvider corpus,
-    ICallerContext caller)
+    ICallerContext caller,
+    EgressAdmission egress)
     : IRequestHandler<SubmitScanCommand, Response>
 {
     private static readonly JsonSerializerOptions MetadataJsonOptions = new()
@@ -34,6 +36,15 @@ public class SubmitScanCommandHandler(
             return await Response.FailureAsync(
                 $"token is missing the '{AuthScopes.ScanWrite}' scope", HttpStatusCode.Forbidden);
  
+        // ---- 1b. Refuse work this deployment cannot process within its egress policy ----
+        // SEC-34. Before anything is parsed or stored: if the process is configured to send
+        // job content to a host that is not on the allowlist, it does not take the job at
+        // all. 503 rather than 4xx — the caller did nothing wrong, and a retry after the
+        // deployment is fixed is the correct next step. See EgressAdmission for exactly how
+        // much this enforces (configuration, not sockets).
+        if (egress.Describe() is { } egressProblem)
+            return await Response.FailureAsync(egressProblem, HttpStatusCode.ServiceUnavailable);
+
         // ---- 2. Parse the metadata part -----------------------------------------------
         BundleMetadata? metadata;
         try
@@ -81,7 +92,18 @@ public class SubmitScanCommandHandler(
         // the original may be a forward-only stream, and re-reading it would silently persist
         // a truncated or empty bundle while the DB row still claimed the correct hash/size.
         await using var rawBundle = inspection.RawBundle!;
- 
+
+        // SEC-34 box 2, asserted here rather than assumed from the runner: the bundle holds
+        // the collector's artifacts and nothing else, so there is no application source for
+        // this backend to process. The inspector already applied an extension denylist —
+        // this is the layout allowlist, and it catches what a denylist structurally cannot
+        // (its own copy of the list omits .js, so a Node app passes every guard before this
+        // one). Placed after the `await using` above so a rejection still disposes the
+        // buffered bundle rather than leaking it.
+        var content = BundleContentPolicy.Evaluate(inspection.Entries);
+        if (!content.IsAccepted)
+            return await Response.FailureAsync(content.Error!, HttpStatusCode.UnprocessableEntity);
+
         // The runner's manifest is provenance, not proof. If it claims files the tarball
         // does not contain, the two disagree and we would be recording a fiction.
         var missing = metadata.Artifacts

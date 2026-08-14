@@ -341,6 +341,24 @@ namespace SentinelAI.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal>("CheapTierCost")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<long>("CheapTierInputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("CheapTierOutputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("CostCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<bool>("CostRated")
+                        .HasColumnType("bit");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -350,6 +368,19 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.Property<string>("Framing")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal>("HighTierCost")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<long>("HighTierInputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("HighTierOutputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("ModelCalls")
+                        .HasColumnType("int");
 
                     b.Property<bool>("Retained")
                         .HasColumnType("bit");

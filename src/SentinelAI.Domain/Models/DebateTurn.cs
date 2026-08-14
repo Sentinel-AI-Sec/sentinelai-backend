@@ -46,5 +46,23 @@ public sealed record DebateTurn
     /// </remarks>
     public bool VerdictReadable { get; init; } = true;
 
+    /// <summary>
+    /// Which model tier served this turn (SEC-31). Stamped by the executor from the routing
+    /// policy it was built with, so the transcript itself is the evidence that reasoning turns
+    /// went to the high tier and routine ones did not.
+    /// </summary>
+    /// <remarks>
+    /// Recorded per turn rather than looked up per role after the fact. A role's tier is
+    /// configurable, so reading it back from configuration at report time would describe
+    /// whatever the settings say <em>now</em> rather than what actually ran.
+    /// </remarks>
+    public ModelTier Tier { get; init; } = ModelTier.High;
+
+    /// <summary>
+    /// Tokens the provider billed for this turn, or <see cref="TokenUsage.None"/> when it
+    /// reported none. Aggregated by tier into <see cref="DraftAudit.Cost"/>.
+    /// </summary>
+    public TokenUsage Usage { get; init; } = TokenUsage.None;
+
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 }

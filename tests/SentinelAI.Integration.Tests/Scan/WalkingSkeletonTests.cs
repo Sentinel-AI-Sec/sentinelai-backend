@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SentinelAI.Application.Abstractions;
 using SentinelAI.Application.Features.Scan.Graph;
 using SentinelAI.Application.Features.Scan.Reporting;
+using SentinelAI.Application.Features.Scan.Retrieval;
 using SentinelAI.Application.Features.Scan.ThinSlice;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Enums;
@@ -53,6 +54,7 @@ public class WalkingSkeletonTests
 
     private static ThinSlicePipeline Build(IDebateEngine? debate = null) =>
         new(new GraphSeeder(),
+            new RetrievalQueryBuilder(),
             new SeedKnowledgeRetriever(NullLogger<SeedKnowledgeRetriever>.Instance),
             new ScanBriefRenderer(),
             debate ?? new ScriptedDebate(),
@@ -105,8 +107,8 @@ public class WalkingSkeletonTests
     {
         var spy = new SpyRetriever();
         var pipeline = new ThinSlicePipeline(
-            new GraphSeeder(), spy, new ScanBriefRenderer(), new ScriptedDebate(),
-            new ReportBuilder(), NullLogger<ThinSlicePipeline>.Instance);
+            new GraphSeeder(), new RetrievalQueryBuilder(), spy, new ScanBriefRenderer(),
+            new ScriptedDebate(), new ReportBuilder(), NullLogger<ThinSlicePipeline>.Instance);
 
         await pipeline.RunAsync([SeededFinding()], Tenant, Job);
 

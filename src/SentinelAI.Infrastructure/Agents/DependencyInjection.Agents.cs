@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using SentinelAI.Application.Abstractions;
 using SentinelAI.Application.Debate;
@@ -7,6 +8,7 @@ using SentinelAI.Application.Features.Scan.Security;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Infrastructure.Agents.Orchestration;
 using SentinelAI.Infrastructure.Agents.Providers;
+using SentinelAI.Infrastructure.Security;
 
 namespace SentinelAI.Infrastructure.Agents;
 
@@ -39,6 +41,12 @@ public static class AgentsDependencyInjection
         // Turn-cap, model tiers, token budget.
         services.Configure<DebateOptions>(configuration.GetSection(DebateOptions.SectionName));
 
+        // SEC-31: what a token costs on this provider. Loaded here, next to the provider it
+        // is priced against, so nothing downstream has to know which vendor it is billing.
+        // Config wins; published list prices fill the gaps; an unpriced tier stays unpriced
+        // rather than defaulting to zero and reporting a live debate as free.
+        services.AddSingleton(ProviderPricing.Load(configuration, models.Provider));
+
         // Singleton because it caches one remote client per (role, tier) — a workflow is
         // built per scan, so a scoped factory would rebuild those connections every request.
         services.AddSingleton<IChatClientFactory>(_ => new ChatClientFactory(models));
@@ -47,6 +55,14 @@ public static class AgentsDependencyInjection
         // the last thing between a brief and a model provider is always a secret scan. Wrapping
         // at registration rather than asking callers to remember is the whole point: a guard you
         // have to opt into is a guard someone eventually forgets.
+        //
+        // The scanner is registered here rather than only in the root Infrastructure module
+        // because this module is what creates the dependency on it. Leaving it to the root made
+        // AddDebateServices insufficient on its own: the app booted fine — the root happens to
+        // register both — but a container built from this call alone threw on the first
+        // IDebateEngine resolve. TryAdd so a host that has already chosen a scanner keeps it.
+        services.TryAddSingleton<ISecretScanner, RegexSecretScanner>();
+
         services.AddSingleton<DebateEngine>();
         services.AddSingleton<IDebateEngine>(sp => new RedactingDebateEngine(
             sp.GetRequiredService<DebateEngine>(),

@@ -27,6 +27,15 @@ namespace SentinelAI.Integration.Tests.Scan.Graph;
 /// (<c>sentinelai-fixtures</c>), trimmed to the blocks that carry the chain. Rewriting them to
 /// something tidier would make this test pass on a graph the product never sees.
 /// </para>
+/// <para>
+/// <b>These are copies, and a copy can drift from what it copies.</b> For one sprint this file's
+/// Dockerfile carried <c>LABEL org.sentinelai.image</c> while the fixture's did not: this test
+/// asserted the flagship chain end to end and passed, while the committed fixture produced seven
+/// two-node candidates and no flagship. The label is in the fixture now, but the hazard is
+/// structural — nothing here reads a fixture file from disk, so every constant below is a
+/// snapshot that only a human keeps in step. Prefer adding a from-disk assertion over adding a
+/// constant when covering something new.
+/// </para>
 /// </remarks>
 public class FlagshipChainTests
 {
@@ -346,6 +355,15 @@ public class FlagshipChainTests
     /// dropped, so any chain through it is <c>Unresolved</c> — "potential chain, unverified
     /// join", never a confirmed result.
     /// </summary>
+    /// <remarks>
+    /// The image below is written <c>image = var.legacy_worker_image</c> — bare, exactly as
+    /// <c>sentinelai-fixtures/infra/main.tf</c> writes it. It used to be quoted here
+    /// (<c>"${var.legacy_worker_image}"</c>), and that one pair of quotes is the whole of finding
+    /// 19-B: the extractor's regex accepted only quoted values, so this test matched and passed
+    /// while the real fixture's legacy task was dropped from the extractor's output entirely —
+    /// not recorded as unresolved, simply gone. The tier this test exists to prove was
+    /// unreachable in production for a sprint, and the copy is why nobody could see it.
+    /// </remarks>
     [Fact]
     public async Task The_deliberately_ambiguous_join_produces_an_unresolved_chain_not_a_missing_one()
     {
@@ -361,7 +379,7 @@ public class FlagshipChainTests
               task_role_arn = aws_iam_role.legacy_worker_role.arn
 
               container_definitions = jsonencode([
-                { name = "legacy-worker", image = "${var.legacy_worker_image}" }
+                { name = "legacy-worker", image = var.legacy_worker_image }
               ])
             }
 
@@ -397,20 +415,43 @@ public class FlagshipChainTests
     }
 
     /// <summary>
-    /// The infra spine reverses every Terraform dependency, so <c>iam_role → task</c> is a real
-    /// stored edge. It is real and it points the wrong way, and no candidate walks it.
+    /// The graph never stores a task↔role pair in both directions, and therefore no candidate can
+    /// walk the backwards one.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The spine reverses every Terraform dependency, which for <c>task depends on role</c>
+    /// yields <c>role → task</c> — a build-order fact flipped into something that reads as an
+    /// attacker move and is not one. <c>TaskDefinitionRoleExtractor</c> separately emits
+    /// <c>task --assumes--&gt; role</c>, which is the real move. Measured on the fixture, both
+    /// used to be stored, both <see cref="Confidence.Certain"/>, making a two-node cycle out of
+    /// the hop the flagship chain runs through.
+    /// </para>
+    /// <para>
+    /// This asserts the pair is now claimed once, not filtered later. An earlier version of this
+    /// test asserted the opposite — that the reversed edge <em>is</em> stored and traversal
+    /// simply declines to walk it — which left the contradiction in the database for every
+    /// consumer that is not the traverser.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public async Task No_candidate_walks_the_reversal_artifact_backwards()
+    public async Task The_task_role_pair_is_stored_in_one_direction_only()
     {
         var unitOfWork = await BuildGraphAsync();
         var candidates = await TraverseFixtureAsync(unitOfWork);
 
         var nodes = unitOfWork.FakeRepository<GraphNode>().Added.ToDictionary(n => n.NodeKey, StringComparer.Ordinal);
-        Assert.Contains(
-            unitOfWork.FakeRepository<GraphEdge>().Added,
-            e => e.FromNodeId == nodes[RoleKey].Id && e.ToNodeId == nodes[TaskKey].Id);
+        var edges = unitOfWork.FakeRepository<GraphEdge>().Added;
 
+        Assert.Contains(edges, e => e.FromNodeId == nodes[TaskKey].Id && e.ToNodeId == nodes[RoleKey].Id);
+
+        Assert.DoesNotContain(edges, e => e.FromNodeId == nodes[RoleKey].Id && e.ToNodeId == nodes[TaskKey].Id);
+
+        // No pair anywhere in the graph is joined in both directions.
+        var pairs = edges.Select(e => (e.FromNodeId, e.ToNodeId)).ToHashSet();
+        Assert.DoesNotContain(pairs, p => pairs.Contains((p.ToNodeId, p.FromNodeId)));
+
+        // And the traversal, unsurprisingly, cannot walk an edge that does not exist.
         Assert.All(candidates, c => Assert.DoesNotContain(
             c.Hops.Skip(1),
             h => h.EdgeFromPrevious!.FromNodeId == nodes[RoleKey].Id

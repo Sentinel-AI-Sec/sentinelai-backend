@@ -33,6 +33,10 @@ public static class DependencyInjection
         // is additionally wrapped there so the model boundary itself is guarded.
         services.AddScoped<Features.Scan.Security.IngressRedactionGate>();
 
+        // SEC-34: the egress admission check the submit handler runs. Its IEgressPolicy and
+        // IOutboundEndpointCatalog are supplied by Infrastructure, which owns configuration.
+        services.AddScoped<Features.Scan.Security.EgressAdmission>();
+
         // SEC-17: the infra spine. Its IInfraSpineReader (the Terraform DOT/HCL reader) is
         // supplied by Infrastructure; this class owns the upsert against the DB.
         services.AddScoped<Features.Scan.Graph.InfraSpineWriter>();
@@ -57,6 +61,9 @@ public static class DependencyInjection
         // ingested bundle. POST /v1/scans/{id}/graph is its only caller today; a queue-driven
         // worker takes it over when one exists.
         services.AddScoped<Features.Scan.Graph.GraphStagePipeline>();
+
+        // SEC-21: the query the corpus is searched with. Pure — the retriever itself is the port.
+        services.AddScoped<Features.Scan.Retrieval.RetrievalQueryBuilder>();
 
         // SEC-45: the walking skeleton. Every stage below is pure except the two ports it
         // composes — IKnowledgeRetriever and IDebateEngine — which Infrastructure supplies.

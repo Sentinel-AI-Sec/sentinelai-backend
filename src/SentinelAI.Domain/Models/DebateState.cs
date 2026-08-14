@@ -41,6 +41,24 @@ public sealed record DebateState
     /// <summary>True once the orchestrator stopped the debate for hitting the turn-cap.</summary>
     public bool TurnCapReached { get; init; }
 
+    /// <summary>
+    /// The Orchestrator's round-0 briefing turn, kept out of <see cref="Transcript"/>.
+    /// </summary>
+    /// <remarks>
+    /// The seed is not a debate turn — nobody asserts or rebuts anything in it — so counting
+    /// it in the transcript would inflate <see cref="TurnCount"/> and every round number
+    /// derived from it. But when the Orchestrator is model-backed it is a real, billed model
+    /// call, and SEC-31's cost figure is wrong if it is dropped. Holding it here keeps the
+    /// transcript honest and the accounting complete, and being part of this record means it
+    /// survives a checkpoint like everything else.
+    /// </remarks>
+    public DebateTurn? Seed { get; init; }
+
+    /// <summary>Every model-backed turn this debate ran, the seed included, in order.</summary>
+    [JsonIgnore]
+    public IEnumerable<DebateTurn> AllTurns =>
+        Seed is null ? Transcript : Transcript.Prepend(Seed);
+
     [JsonIgnore]
     public int TurnCount => Transcript.Count;
 

@@ -4,6 +4,7 @@ using SentinelAI.Application.Abstractions;
 using SentinelAI.Application.Debate;
 using SentinelAI.Application.Features.Scan.Graph;
 using SentinelAI.Application.Features.Scan.Reporting;
+using SentinelAI.Application.Features.Scan.Retrieval;
 using SentinelAI.Application.Features.Scan.ThinSlice;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Enums;
@@ -92,6 +93,7 @@ internal static class HandoffFixture
     public static ThinSlicePipeline BuildPipeline(
         IDebateEngine? debate = null, IKnowledgeRetriever? retriever = null) =>
         new(new GraphSeeder(),
+            new RetrievalQueryBuilder(),
             retriever ?? new SeedKnowledgeRetriever(NullLogger<SeedKnowledgeRetriever>.Instance),
             new ScanBriefRenderer(),
             debate ?? RealDebateOffline(),

@@ -19,7 +19,33 @@ internal static partial class TaskDefinitionImageExtractor
     [GeneratedRegex("""resource\s+"aws_ecs_task_definition"\s+"([A-Za-z0-9_]+)"\s*\{""", RegexOptions.CultureInvariant)]
     private static partial Regex TaskDefinitionHeader();
 
-    [GeneratedRegex(""""(?:"image"\s*:|image\s*=)\s*"([^"]*)"""", RegexOptions.CultureInvariant)]
+    /// <summary>
+    /// The <c>image</c> value, in either of the two shapes HCL writes it: a quoted string
+    /// (<c>image = "repo/name:tag"</c>, which also covers <c>image = "${var.x}"</c>) or a bare
+    /// expression referencing a variable or a local (<c>image = var.legacy_worker_image</c>).
+    /// </summary>
+    /// <remarks>
+    /// <b>The bare alternative is not a nicety; without it a whole confidence tier is dead code.</b>
+    /// This pattern used to require the quotes. The fixture's second task definition
+    /// (<c>legacy_worker_task</c>) exists precisely to exercise SEC-19's <c>unresolved</c> tier and
+    /// writes <c>image = var.legacy_worker_image</c> — unquoted, because that is how a Terraform
+    /// author writes a plain variable reference. A quotes-only pattern therefore did not match it,
+    /// the task was absent from this result entirely, <see cref="CodeInfraSeamReader"/> saw nothing
+    /// to join, and SEC-19's second acceptance criterion ("no confident match but both reference an
+    /// image → unresolved edge recorded") could not be satisfied by any input the fixture contains.
+    /// The failure was silent in the worst way: the seam looked healthy because the only task it
+    /// could see was the one that matches.
+    /// <para>
+    /// Only <c>var.</c>/<c>local.</c> references are accepted bare, not arbitrary HCL. That keeps
+    /// the widening to exactly the shape <see cref="TerraformVariableResolver.Substitute"/> already
+    /// resolves — its <c>BareReference</c> pass was written for this and had never been handed one
+    /// from here — rather than admitting function calls or interpolated expressions this file has
+    /// no way to evaluate and would silently compare as literal text.
+    /// </para>
+    /// </remarks>
+    [GeneratedRegex(
+        """(?:"image"\s*:|image\s*=)\s*(?:"(?<quoted>[^"]*)"|(?<bare>(?:var|local)\.[A-Za-z_][A-Za-z0-9_]*))""",
+        RegexOptions.CultureInvariant)]
     private static partial Regex ImageField();
 
     /// <summary>Task definition resource name (e.g. <c>order_task</c>) → its raw, unresolved
@@ -40,7 +66,15 @@ internal static partial class TaskDefinitionImageExtractor
             if (bodyEnd < 0) continue;
 
             var image = ImageField().Match(combined[bodyStart..bodyEnd]);
-            if (image.Success) result[header.Groups[1].Value] = image.Groups[1].Value;
+            if (!image.Success) continue;
+
+            // Exactly one of the two alternatives matched; the other group is unsuccessful and
+            // its Value would be "". Reading Groups["quoted"].Value unconditionally would map a
+            // bare reference to an empty string, which ImageNameNormalizer then rejects — the
+            // same "absent task definition" outcome the quotes-only pattern used to produce,
+            // just one line later.
+            var quoted = image.Groups["quoted"];
+            result[header.Groups[1].Value] = quoted.Success ? quoted.Value : image.Groups["bare"].Value;
         }
 
         return result;

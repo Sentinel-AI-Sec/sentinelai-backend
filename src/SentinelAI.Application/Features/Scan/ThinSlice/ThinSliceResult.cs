@@ -19,6 +19,18 @@ public sealed record ThinSliceResult
     /// <summary>Stage 2 — the nodes those findings decorate.</summary>
     public required IReadOnlyList<GraphNode> Nodes { get; init; }
 
+    /// <summary>
+    /// Stage 2's other output (SEC-21) — the candidate attack paths, handed on with their
+    /// technique and evidence slots still empty.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Nodes"/> on purpose: those are the static resource graph, this is
+    /// the unasserted attack graph built over it, and a caller that cannot tell which it is
+    /// holding is a caller that can report a traversal as a finding. Empty candidates whenever the
+    /// graph stage has not run.
+    /// </remarks>
+    public required AttackGraphHandoff Handoff { get; init; }
+
     /// <summary>Stage 3 — knowledge chunks retrieved for the findings' linking keys.</summary>
     public required IReadOnlyList<string> Knowledge { get; init; }
 

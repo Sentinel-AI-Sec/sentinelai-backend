@@ -31,21 +31,38 @@ public static class DebateWorkflow
         [AgentRole.Orchestrator, AgentRole.Red, AgentRole.Blue, AgentRole.Reporter];
 
     /// <summary>Builds the workflow from an explicit chat-client factory.</summary>
-    public static Workflow Build(IChatClientFactory clients, DebateOptions? options = null)
+    /// <param name="clients">The provider seam. The only thing here that knows a vendor.</param>
+    /// <param name="options">Turn-cap, tier routing, token budget.</param>
+    /// <param name="pricing">
+    /// Token rates for the audit's cost breakdown (SEC-31). Null counts tokens without
+    /// pricing them, which is what the audit then reports.
+    /// </param>
+    public static Workflow Build(
+        IChatClientFactory clients, DebateOptions? options = null, ModelPricing? pricing = null)
     {
         ArgumentNullException.ThrowIfNull(clients);
         options ??= new DebateOptions();
         options.Validate();
 
+        // Resolved once, here, and then carried by both the client and the executor. Asking
+        // the policy twice is how the model that answered and the tier the audit bills could
+        // drift apart — and the bill is only evidence if it names what actually ran.
+        var tiers = ModelBackedRoles.ToDictionary(role => role, options.TierFor);
+
         var orchestrator = new OrchestratorExecutor(
-            CreateAgent(clients, options, AgentRole.Orchestrator, "Orchestrator", OrchestratorExecutor.Instructions));
+            CreateAgent(clients, options, AgentRole.Orchestrator, "Orchestrator", OrchestratorExecutor.Instructions),
+            tiers[AgentRole.Orchestrator]);
         var red = new RedTeamExecutor(
-            CreateAgent(clients, options, AgentRole.Red, "RedTeam", RedTeamExecutor.Instructions));
+            CreateAgent(clients, options, AgentRole.Red, "RedTeam", RedTeamExecutor.Instructions),
+            tiers[AgentRole.Red]);
         var blue = new BlueTeamExecutor(
-            CreateAgent(clients, options, AgentRole.Blue, "BlueTeam", BlueTeamExecutor.Instructions));
+            CreateAgent(clients, options, AgentRole.Blue, "BlueTeam", BlueTeamExecutor.Instructions),
+            tiers[AgentRole.Blue]);
         var reporter = new ReporterExecutor(
             CreateAgent(clients, options, AgentRole.Reporter, "Reporter", ReporterExecutor.Instructions),
-            options.MaxRounds);
+            options.MaxRounds,
+            tiers[AgentRole.Reporter],
+            pricing);
 
         return Build(orchestrator, red, blue, reporter, options.MaxRounds);
     }

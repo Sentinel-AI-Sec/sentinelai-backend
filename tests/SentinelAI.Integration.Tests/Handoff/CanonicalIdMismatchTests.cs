@@ -23,6 +23,16 @@ namespace SentinelAI.Integration.Tests.Handoff;
 /// stage and silence is the exact failure mode. The contrast test proves the guard discriminates —
 /// the canonical key attaches, the broken one does not.
 /// </para>
+/// <para>
+/// <b>What this file does not cover, and cannot.</b> Every case here is a <em>syntactically</em>
+/// wrong key, and the guard is a syntax check. The island split that actually happened in this
+/// codebase was two keys that are both perfectly canonical at different granularities —
+/// <c>pkg:newtonsoft.json:12.0.1</c> from the unifier against <c>pkg:newtonsoft.json</c> from the
+/// lock file. <see cref="NodeId.IsCanonical"/> is true of both, nothing throws, and the guard
+/// below is silent, as the last test here demonstrates rather than leaves implied. Catching that
+/// needs a measurement, not an exception, and that lives in
+/// <see cref="CommittedFixtureGranularityTests"/>.
+/// </para>
 /// </remarks>
 public class CanonicalIdMismatchTests
 {
@@ -66,5 +76,38 @@ public class CanonicalIdMismatchTests
         // And the two keys really are different strings — the silent failure was that nothing ever
         // compared them.
         Assert.NotEqual(canonical.NodeRef, broken.NodeRef);
+    }
+
+    /// <summary>
+    /// The limit of this guard, asserted rather than assumed: two canonical keys at different
+    /// granularities are not a mismatch it can see.
+    /// </summary>
+    /// <remarks>
+    /// This test passes today and is meant to. It is here so nobody reads the rest of the file and
+    /// concludes the island bug is covered. The finding's ref is version-grained because a scanner
+    /// reports the version it found; the node is name-grained because the lock file's node is the
+    /// package whatever version resolved. Both are what <see cref="NodeId"/> would build, so
+    /// <see cref="GraphSeeder"/> accepts the finding, produces a node nothing else shares, and the
+    /// graph quietly holds two islands. The join that closes it is
+    /// <c>GraphDecorator</c>'s, and whether it still closes on the real fixture is measured in
+    /// <see cref="CommittedFixtureGranularityTests"/>.
+    /// </remarks>
+    [Fact]
+    public void The_guard_is_silent_when_both_spellings_are_canonical_at_different_granularities()
+    {
+        var scannerRef = NodeId.Package("newtonsoft.json:12.0.1");   // what FindingUnifier emits
+        var lockFileKey = NodeId.Package("newtonsoft.json");         // what DepCodeSeamReader emits
+
+        Assert.True(NodeId.IsCanonical(scannerRef));
+        Assert.True(NodeId.IsCanonical(lockFileKey));
+        Assert.NotEqual(scannerRef, lockFileKey);
+
+        var finding = HandoffFixture.SeededFinding();
+        finding.NodeRef = scannerRef;
+
+        // No throw, no warning, no null lookup — an island, built successfully.
+        var node = Assert.Single(_graph.Seed([finding], HandoffFixture.Tenant, HandoffFixture.Job));
+        Assert.Equal(scannerRef, node.NodeKey);
+        Assert.NotEqual(lockFileKey, node.NodeKey);
     }
 }

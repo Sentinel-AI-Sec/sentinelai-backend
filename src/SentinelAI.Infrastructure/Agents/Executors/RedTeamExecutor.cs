@@ -8,7 +8,8 @@ namespace SentinelAI.Infrastructure.Agents.Executors;
 /// Asserts ordered cross-layer exploit paths within bounded candidates (AID-01 3.1).
 /// Heads each debate round, so it is what increments the round counter.
 /// </summary>
-public sealed class RedTeamExecutor(AIAgent agent) : DebateExecutor(ExecutorId, agent, AgentRole.Red)
+public sealed class RedTeamExecutor(AIAgent agent, ModelTier tier = ModelTier.High)
+    : DebateExecutor(ExecutorId, agent, AgentRole.Red, tier)
 {
     /// <summary>Node id in the workflow graph. Named to avoid shadowing <c>Executor.Id</c>.</summary>
     public const string ExecutorId = "red-team";

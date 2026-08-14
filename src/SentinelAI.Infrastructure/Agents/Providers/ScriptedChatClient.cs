@@ -84,9 +84,38 @@ public sealed class ScriptedChatClient : IChatClient
         return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, text))
         {
             ModelId = options?.ModelId ?? "scripted",
-            ResponseId = $"scripted-{CallCount}"
+            ResponseId = $"scripted-{CallCount}",
+            Usage = UsageFor(list, options, text)
         });
     }
+
+    /// <summary>
+    /// A deterministic stand-in for the token counts a real provider returns.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Usage is reported so the SEC-31 accounting path is exercised offline: without it every
+    /// test and every credential-free run measures zero tokens, and an assertion that cost was
+    /// recorded passes whether the plumbing works or not.
+    /// </para>
+    /// <para>
+    /// These are <em>estimates</em>, on the usual four-characters-per-token rule of thumb, and
+    /// they are not passed off as anything else. What stops them turning into invented money
+    /// is that the Scripted provider's rate is a real zero — nothing leaves the process, so
+    /// nothing is billed — and <c>ProviderPricing</c> prices it accordingly. Offline runs show
+    /// a token breakdown and a cost of zero, both of which are true.
+    /// </para>
+    /// </remarks>
+    private static UsageDetails UsageFor(
+        IReadOnlyList<ChatMessage> messages, ChatOptions? options, string response) => new()
+        {
+            InputTokenCount = EstimateTokens(options?.Instructions)
+                + messages.Sum(m => EstimateTokens(m.Text)),
+            OutputTokenCount = EstimateTokens(response)
+        };
+
+    private static long EstimateTokens(string? text) =>
+        string.IsNullOrEmpty(text) ? 0 : (text.Length + 3) / 4;
 
     public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages,
