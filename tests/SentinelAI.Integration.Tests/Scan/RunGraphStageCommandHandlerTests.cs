@@ -65,6 +65,7 @@ public class RunGraphStageCommandHandlerTests
 
         return new RunGraphStageCommandHandler(
             unitOfWork, caller, normalization, gate, findingWriter, graphStage,
+            new ScanBriefRenderer(),
             NullLogger<RunGraphStageCommandHandler>.Instance);
     }
 

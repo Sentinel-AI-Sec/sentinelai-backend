@@ -22,18 +22,32 @@ namespace SentinelAI.Application.Features.Scan.Graph;
 /// matched back. The brief tells the agents to use them as-is, for the same reason.
 /// </para>
 /// <para>
-/// It renders no edges, because the seeded graph has none. Saying so explicitly matters: an
-/// agent given a node list with no stated edge policy will infer edges, and an inferred edge is
-/// a fabricated hop.
+/// <b>Edges are rendered when there are any, and their absence is stated when there are not.</b>
+/// Either way the policy is explicit, because an agent given a node list with no stated edge
+/// policy will infer edges, and an inferred edge is a fabricated hop.
+/// </para>
+/// <para>
+/// This used to say "Edges: none were extracted for this scan" unconditionally — true when it
+/// was written, because the SEC-45 seeder produces nodes and no edges. It stayed true in the
+/// text long after it stopped being true in the graph: SEC-17→SEC-19 build an infra spine and
+/// three seams, and the committed fixture yields <b>68 edges</b>. Every one of them was hidden
+/// from the agents, who were then told not to infer any — so Red was asked to assert a
+/// cross-layer chain over a graph it had been shown no way to cross. The chain the whole sprint
+/// is about was unreachable in the prompt while being perfectly present in the database.
 /// </para>
 /// </remarks>
 public sealed class ScanBriefRenderer
 {
+    /// <param name="edges">
+    /// The edges of the graph the nodes came from. Null or empty renders the explicit
+    /// "none were extracted, do not infer one" policy; anything else is listed in full.
+    /// </param>
     public ScanBrief Render(
         Guid scanJobId,
         IReadOnlyList<Finding> findings,
         IReadOnlyList<GraphNode> nodes,
-        IReadOnlyList<string> knowledge)
+        IReadOnlyList<string> knowledge,
+        IReadOnlyList<GraphEdge>? edges = null)
     {
         var sb = new StringBuilder();
 
@@ -62,9 +76,7 @@ public sealed class ScanBriefRenderer
             : string.Join(" | ", nodes.Select((n, i) => $"N{i + 1}={n.NodeKey}{(n.IsHot ? " HOT" : "")}")));
 
         sb.AppendLine();
-        sb.AppendLine(
-            "Edges: none were extracted for this scan. Do not infer one. A hop you cannot name "
-            + "an edge for is not a hop.");
+        AppendEdges(sb, nodes, edges);
 
         if (knowledge.Count > 0)
         {
@@ -75,6 +87,71 @@ public sealed class ScanBriefRenderer
         }
 
         return new ScanBrief(scanJobId.ToString(), sb.ToString());
+    }
+
+    /// <summary>
+    /// Writes the edge list, or the explicit no-edges policy when the graph has none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Edges are written as <c>N3 --used-by--> N7 (certain)</c>: the same N-indices the node
+    /// line just defined, so the agents can read a path without re-matching node keys, and the
+    /// confidence in brackets because AID-01 §3.3 makes the weakest join the whole chain's
+    /// confidence — an agent that cannot see which join is weak cannot report it.
+    /// </para>
+    /// <para>
+    /// An edge whose endpoints are not both in <paramref name="nodes"/> is skipped rather than
+    /// written with a dangling reference. That should not happen — the writers persist both
+    /// together — but a brief naming a node the node list does not contain is precisely the
+    /// mismatch that makes an agent assert a chain nothing can match back.
+    /// </para>
+    /// </remarks>
+    private static void AppendEdges(
+        StringBuilder sb, IReadOnlyList<GraphNode> nodes, IReadOnlyList<GraphEdge>? edges)
+    {
+        if (edges is null || edges.Count == 0)
+        {
+            sb.AppendLine(
+                "Edges: none were extracted for this scan. Do not infer one. A hop you cannot name "
+                + "an edge for is not a hop.");
+            return;
+        }
+
+        var labelById = nodes
+            .Select((node, index) => (node.Id, Label: $"N{index + 1}"))
+            .ToDictionary(entry => entry.Id, entry => entry.Label);
+
+        var indexById = nodes
+            .Select((node, index) => (node.Id, Index: index))
+            .ToDictionary(entry => entry.Id, entry => entry.Index);
+
+        sb.AppendLine("Edges (these are the only ones that exist — do not infer any other):");
+
+        // Ordered by endpoint, not by insertion. Persistence order interleaves the handful of
+        // cross-layer edges that make a chain possible with the dozens of dep→code edges that
+        // all point at the same node — on the committed fixture, nine among fifty-nine. Sorted,
+        // every edge out of a node is contiguous, so the path an agent has to find reads down
+        // the page instead of being reassembled from scattered lines.
+        var ordered = edges
+            .Where(e => indexById.ContainsKey(e.FromNodeId) && indexById.ContainsKey(e.ToNodeId))
+            .OrderBy(e => indexById[e.FromNodeId])
+            .ThenBy(e => indexById[e.ToNodeId]);
+
+        var written = 0;
+        foreach (var edge in ordered)
+        {
+            sb.Append("  ").Append(labelById[edge.FromNodeId])
+              .Append(" --").Append(edge.Relation).Append("--> ").Append(labelById[edge.ToNodeId])
+              .Append(" (").Append(edge.Confidence.ToString().ToLowerInvariant()).AppendLine(")");
+            written++;
+        }
+
+        if (written == 0)
+            sb.AppendLine("  (none joined the nodes above)");
+
+        sb.AppendLine(
+            "A hop you cannot name an edge for is not a hop. A chain is no more confident than "
+            + "its weakest edge.");
     }
 
     /// <summary>

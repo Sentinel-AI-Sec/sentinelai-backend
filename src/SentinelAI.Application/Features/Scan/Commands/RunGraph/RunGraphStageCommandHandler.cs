@@ -22,6 +22,7 @@ public class RunGraphStageCommandHandler(
     IngressRedactionGate gate,
     NormalizedFindingWriter findingWriter,
     GraphStagePipeline graphStage,
+    ScanBriefRenderer briefRenderer,
     ILogger<RunGraphStageCommandHandler> logger)
     : IRequestHandler<RunGraphStageCommand, Response>
 {
@@ -71,8 +72,16 @@ public class RunGraphStageCommandHandler(
 
             await AdvanceStageAsync(job, ScanStage.Graph, failure: null);
 
+            // Read back what was persisted rather than reusing an in-memory copy: the graph the
+            // agents will reason over is the one in the rows, and a response built from
+            // something else could agree with the pipeline while disagreeing with the database.
+            var graph = await ReadGraphAsync(job.Id);
+            var brief = briefRenderer.Render(job.Id, findings, graph.Nodes, [], graph.Edges);
+
+            LogGraph(job.Id, graph, brief);
+
             return await Response.SuccessAsync(
-                RunGraphStageResponse.From(job.Id, findings, gated, result),
+                RunGraphStageResponse.From(job.Id, findings, gated, result, graph, brief.Context),
                 "graph stage complete",
                 HttpStatusCode.OK);
         }
@@ -87,6 +96,46 @@ public class RunGraphStageCommandHandler(
             return await Response.FailureAsync(
                 $"graph stage failed: {ex.Message}", HttpStatusCode.InternalServerError);
         }
+    }
+
+    /// <summary>The graph rows this job persisted, nodes and edges together.</summary>
+    private async Task<PersistedGraph> ReadGraphAsync(Guid scanJobId)
+    {
+        var nodes = (await unitOfWork.Repository<GraphNode>()
+            .GetWhereAsync(n => n.ScanJobId == scanJobId)).ToList();
+
+        var edges = (await unitOfWork.Repository<GraphEdge>()
+            .GetWhereAsync(e => e.ScanJobId == scanJobId)).ToList();
+
+        return new PersistedGraph(nodes, edges);
+    }
+
+    /// <summary>
+    /// Logs the graph the agents will be given, in full.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Counts alone cannot answer the question anyone debugging a bad chain actually has, which
+    /// is <em>which</em> edges the agents were shown. "68 edges" and "68 edges, none of them
+    /// joining the layer you care about" print identically.
+    /// </para>
+    /// <para>
+    /// At <see cref="LogLevel.Debug"/>, because on a large repository this is thousands of lines
+    /// and the summary above it is what a normal run wants. It is also on the response, so the
+    /// usual way to read it is the HTTP body rather than turning logging up.
+    /// </para>
+    /// </remarks>
+    private void LogGraph(Guid scanJobId, PersistedGraph graph, ScanBrief brief)
+    {
+        logger.LogInformation(
+            "Graph for scan job {ScanJobId}: {Nodes} node(s), {Edges} edge(s), {Hot} hot",
+            scanJobId, graph.Nodes.Count, graph.Edges.Count, graph.Nodes.Count(n => n.IsHot));
+
+        if (!logger.IsEnabled(LogLevel.Debug)) return;
+
+        logger.LogDebug(
+            "Resource graph handed to the agents for scan job {ScanJobId}:\n{ResourceGraph}",
+            scanJobId, brief.Context);
     }
 
     /// <summary>
@@ -152,6 +201,40 @@ public class RunGraphStageCommandHandler(
     }
 }
 
+/// <summary>The graph rows one scan job persisted.</summary>
+public sealed record PersistedGraph(IReadOnlyList<GraphNode> Nodes, IReadOnlyList<GraphEdge> Edges);
+
+/// <param name="Key">Canonical node key — <c>type:identifier</c>, lower-case.</param>
+/// <param name="Hot">Decorated by a high-severity finding, so traversal may seed from it.</param>
+public sealed record NodeView(string Key, string Type, string Layer, bool Hot)
+{
+    public static NodeView From(GraphNode node) =>
+        new(node.NodeKey, node.NodeType.ToString(), node.Layer.ToString(), node.IsHot);
+}
+
+/// <summary>An edge by node key, so it can be read without resolving row ids.</summary>
+public sealed record EdgeView(string From, string Relation, string To, string Confidence)
+{
+    /// <summary>
+    /// Skips an edge whose endpoints are not both present. That should be impossible — the
+    /// writers persist both together — but a dangling reference on the wire is worse than an
+    /// omission, because it reads as a node the caller simply failed to find.
+    /// </summary>
+    public static IEnumerable<EdgeView> ListFrom(PersistedGraph graph)
+    {
+        var keyById = graph.Nodes.ToDictionary(n => n.Id, n => n.NodeKey);
+
+        foreach (var edge in graph.Edges)
+        {
+            if (!keyById.TryGetValue(edge.FromNodeId, out var from) ||
+                !keyById.TryGetValue(edge.ToNodeId, out var to))
+                continue;
+
+            yield return new EdgeView(from, edge.Relation, to, edge.Confidence.ToString());
+        }
+    }
+}
+
 /// <summary>
 /// What the run produced, flattened for the wire. Chains carry their full node path because the
 /// point of triggering this by hand is to look at them.
@@ -172,6 +255,24 @@ public sealed record RunGraphStageResponse
     public required int CandidateChains { get; init; }
     public required IReadOnlyList<ChainView> Chains { get; init; }
 
+    /// <summary>Every node the graph stage persisted for this job.</summary>
+    public required IReadOnlyList<NodeView> Nodes { get; init; }
+
+    /// <summary>Every edge, by node key rather than by row id, so it reads without a join.</summary>
+    public required IReadOnlyList<EdgeView> Edges { get; init; }
+
+    /// <summary>
+    /// The resource graph exactly as the agents receive it — the rendered brief text.
+    /// </summary>
+    /// <remarks>
+    /// On the wire because a chain the agents get wrong is almost always a chain they were shown
+    /// wrongly, and until this was here there was no way to see what they had been shown short of
+    /// attaching a debugger. It is also the fastest way to exercise the agents against a real
+    /// graph: paste it into <c>POST /v1/debates</c> as <c>resourceGraph</c> and the debate runs
+    /// over this scan's actual nodes and edges.
+    /// </remarks>
+    public required string ResourceGraph { get; init; }
+
     /// <summary>
     /// Every candidate is a path that exists in the graph, not an attack that was proven. Sent on
     /// the wire so a caller cannot render this as a verdict (AID-01 §7).
@@ -184,8 +285,13 @@ public sealed record RunGraphStageResponse
         Guid scanJobId,
         IReadOnlyList<Finding> findings,
         IngressRedactionResult redaction,
-        GraphStageResult result) => new()
+        GraphStageResult result,
+        PersistedGraph graph,
+        string resourceGraph) => new()
         {
+            Nodes = [.. graph.Nodes.Select(NodeView.From)],
+            Edges = [.. EdgeView.ListFrom(graph)],
+            ResourceGraph = resourceGraph,
             ScanJobId = scanJobId.ToString(),
             Findings = findings.Count,
             MessagesRedacted = redaction.MessagesRedacted,
