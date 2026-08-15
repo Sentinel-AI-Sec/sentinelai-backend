@@ -1,3 +1,4 @@
+using SentinelAI.Application.Abstractions;
 using SentinelAI.Domain.Models;
 
 namespace SentinelAI.Application.Features.Scan.ThinSlice;
@@ -42,4 +43,15 @@ public sealed record ThinSliceResult
 
     /// <summary>Stage 5 — the persistable report, with citations.</summary>
     public required Report Report { get; init; }
+
+    /// <summary>
+    /// Stage 6 (SEC-35) — what retention did: the bundle is gone, and whether the report was
+    /// kept.
+    /// </summary>
+    /// <remarks>
+    /// Reported rather than left implicit because "we deleted it" is a claim someone will have
+    /// to answer for. A caller that can see the outcome can log it, return it, or assert on it;
+    /// one that cannot has to take the deletion on trust.
+    /// </remarks>
+    public required RetentionOutcome Retention { get; init; }
 }

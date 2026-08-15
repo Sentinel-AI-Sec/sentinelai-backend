@@ -128,6 +128,11 @@ public static class DependencyInjection
             services.AddScoped<IKnowledgeRetriever, SeedKnowledgeRetriever>();
         }
 
+        // ---- SEC-35: account deletion ----------------------------------------------------
+        // Infrastructure, not Application: the delete order it enforces is a property of the
+        // relational schema's Restrict foreign keys, which nothing above this layer knows about.
+        services.AddScoped<ITenantPurge, TenantPurgeService>();
+
         services.AddScoped<IScanJobRepository, ScanJobRepository>();
         services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
         services.AddScoped<IUnitOfWork, UnitOfWork>();
