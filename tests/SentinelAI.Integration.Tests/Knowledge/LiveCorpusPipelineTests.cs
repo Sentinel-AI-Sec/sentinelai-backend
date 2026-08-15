@@ -10,6 +10,7 @@ using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
 using SentinelAI.Domain.ValueObjects;
 using SentinelAI.Infrastructure.Knowledge;
+using SentinelAI.Integration.Tests.Scan;
 
 namespace SentinelAI.Integration.Tests.Knowledge;
 
@@ -76,6 +77,7 @@ public class LiveCorpusPipelineTests
             new ScanBriefRenderer(),
             new FixedAudit(),
             new ReportBuilder(),
+            new FakeScanRetentionPolicy(),
             NullLogger<ThinSlicePipeline>.Instance);
     }
 
