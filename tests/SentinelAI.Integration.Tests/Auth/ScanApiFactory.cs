@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using SentinelAI.Infrastructure.Agents.Providers;
 using SentinelAI.Infrastructure.Data;
 
 namespace SentinelAI.Integration.Tests.Auth;
@@ -31,6 +33,20 @@ public sealed class ScanApiFactory : WebApplicationFactory<Program>
                 ["Authentication:Jwt:Issuer"] = JwtIssuer,
                 ["Authentication:Jwt:Audience"] = JwtAudience,
                 ["Authentication:Jwt:SigningKey"] = JwtSigningKey,
+
+                // Pinned offline. The test host runs in the Development environment, so it
+                // reads the developer's own appsettings.Development.json — and once that file
+                // names a live provider, every test that reaches a debate starts making real
+                // model calls with real credentials: slow, billable, non-deterministic, and
+                // failing outright on a machine with no keys. The provider is a test-host
+                // concern exactly like the database is, and is overridden here for the same
+                // reason.
+                ["SentinelAI:Models:Provider"] = "Scripted",
+                ["SentinelAI:Models:ApiKey"] = "",
+                ["SentinelAI:Models:Agents:Orchestrator:ApiKey"] = "",
+                ["SentinelAI:Models:Agents:Red:ApiKey"] = "",
+                ["SentinelAI:Models:Agents:Blue:ApiKey"] = "",
+                ["SentinelAI:Models:Agents:Reporter:ApiKey"] = "",
             });
         });
 
@@ -54,6 +70,20 @@ public sealed class ScanApiFactory : WebApplicationFactory<Program>
             foreach (var descriptor in toRemove) services.Remove(descriptor);
 
             services.AddDbContext<SentinelDbContext>(options => options.UseInMemoryDatabase(_databaseName));
+
+            // Force the offline chat client, whatever configuration said.
+            //
+            // The configuration override above is not enough on its own: AddDebateServices
+            // reads the model options *eagerly*, at registration time, so it has already
+            // captured the developer's appsettings.Development.json before a test source is
+            // merged in. Replacing the built factory here is what actually takes effect —
+            // ConfigureTestServices is guaranteed to run after the app's own registrations.
+            //
+            // Without this, any test that reaches a debate makes real billable model calls on
+            // a machine that happens to have keys configured, and times out on one that does
+            // not. The provider is a test-host concern exactly like the database is.
+            services.RemoveAll<IChatClientFactory>();
+            services.AddSingleton<IChatClientFactory>(_ => new ChatClientFactory(new ModelProviderOptions()));
         });
     }
 
