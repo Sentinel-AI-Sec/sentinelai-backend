@@ -22,9 +22,7 @@ namespace SentinelAI.Application.Features.Scan.Normalization;
 /// unreadable file.
 /// </para>
 /// </remarks>
-public sealed class RuleMappingResolver(
-    IRuleMappingLookup lookup,
-    ILogger<RuleMappingResolver> logger)
+public sealed class RuleMappingResolver(IRuleMappingLookup lookup,ILogger<RuleMappingResolver> logger)
 {
     /// <summary>
     /// Fills in <see cref="Finding.CweId"/> where it is missing, in place, and returns how many

@@ -72,6 +72,11 @@ public static class DependencyInjection
         services.AddScoped<Features.Scan.Reporting.ReportBuilder>();
         services.AddScoped<Features.Scan.ThinSlice.ThinSlicePipeline>();
 
+        // SEC-35: retention. The pipeline's last stage — the bundle is deleted and the report
+        // is kept only on opt-in — so "we delete your data" happens by default rather than
+        // when someone remembers to call the purge endpoint.
+        services.AddScoped<Abstractions.IScanRetentionPolicy, Features.Scan.Retention.ScanRetentionPolicy>();
+
         return services;
     }
 }

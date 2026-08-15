@@ -33,6 +33,7 @@ public sealed class ThinSlicePipeline(
     ScanBriefRenderer briefRenderer,
     IDebateEngine debate,
     ReportBuilder reportBuilder,
+    IScanRetentionPolicy retention,
     ILogger<ThinSlicePipeline> logger)
 {
     /// <summary>The collection the offensive knowledge is retrieved from (SEC-09).</summary>
@@ -81,12 +82,21 @@ public sealed class ThinSlicePipeline(
         var report = reportBuilder.Build(
             audit, knowledge, tenantId, scanJobId, Collection, DateTime.UtcNow);
 
+        // ---- Stage 6: retention (SEC-35) --------------------------------------------------
+        // The audit exists, so the customer's bundle has served its purpose and goes now — not
+        // when somebody remembers to call the purge endpoint. Deleting by default is the whole
+        // promise; making it a step of the pipeline rather than a follow-up call is what stops
+        // "we delete your data" from depending on an operator's memory.
+        var retentionOutcome = await retention.ApplyAfterAuditAsync(tenantId, scanJobId, report, ct);
+
         logger.LogInformation(
             "Thin slice for job {JobId}: {Findings} finding(s) -> {Nodes} node(s) -> "
             + "{Candidates} candidate chain(s) -> {Chunks} knowledge chunk(s) -> debate {Outcome} "
-            + "in {Rounds} round(s) -> report with {Citations} citation(s)",
+            + "in {Rounds} round(s) -> report with {Citations} citation(s); bundle purged, "
+            + "report {Fate}",
             scanJobId, findings.Count, nodes.Count, handoff.Candidates.Count, knowledge.Count,
-            audit.Outcome, audit.Rounds, report.Citations.Count);
+            audit.Outcome, audit.Rounds, report.Citations.Count,
+            retentionOutcome.ReportRetained ? "retained" : "discarded");
 
         return new ThinSliceResult
         {
@@ -97,6 +107,7 @@ public sealed class ThinSlicePipeline(
             Brief = brief,
             Audit = audit,
             Report = report,
+            Retention = retentionOutcome,
         };
     }
 

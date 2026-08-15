@@ -33,6 +33,7 @@ public class AttackGraphHandoffWiringTests
             new ScanBriefRenderer(),
             new CapturingDebate(),
             new ReportBuilder(),
+            new FakeScanRetentionPolicy(),
             NullLogger<ThinSlicePipeline>.Instance);
 
     private static GraphNode Node(NodeType type, string identifier, Layer layer) =>

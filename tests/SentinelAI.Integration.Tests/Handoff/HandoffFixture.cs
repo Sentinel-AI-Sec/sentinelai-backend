@@ -13,6 +13,7 @@ using SentinelAI.Domain.ValueObjects;
 using SentinelAI.Infrastructure.Agents.Orchestration;
 using SentinelAI.Infrastructure.Agents.Providers;
 using SentinelAI.Infrastructure.Knowledge;
+using SentinelAI.Integration.Tests.Scan;
 
 namespace SentinelAI.Integration.Tests.Handoff;
 
@@ -98,6 +99,7 @@ internal static class HandoffFixture
             new ScanBriefRenderer(),
             debate ?? RealDebateOffline(),
             new ReportBuilder(),
+            new FakeScanRetentionPolicy(),
             NullLogger<ThinSlicePipeline>.Instance);
 }
 
