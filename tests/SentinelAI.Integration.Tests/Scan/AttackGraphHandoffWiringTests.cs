@@ -139,7 +139,19 @@ public class AttackGraphHandoffWiringTests
 
         await Build(retriever).RunAsync([.. noise, onPath], Tenant, Job, nodes, [chain]);
 
-        Assert.Equal(ThinSlicePipeline.RetrievalSeedCount, retriever.Calls.Count);
+        // The seed budget is per agent, and since SEC-23 there are two of them — so the budget is
+        // spent twice over, once against offense and once against defense. What matters is that
+        // the on-path finding is inside it both times, not that the total is unchanged.
+        Assert.Equal(
+            ThinSlicePipeline.RetrievalSeedCount * ThinSlicePipeline.RetrievingRoles.Count,
+            retriever.Calls.Count);
+
         Assert.Contains(retriever.Calls, c => c.Query.StartsWith("CWE-502", StringComparison.Ordinal));
+
+        foreach (var collection in new[] { "offense", "defense" })
+        {
+            Assert.Contains(retriever.Calls,
+                c => c.Collection == collection && c.Query.StartsWith("CWE-502", StringComparison.Ordinal));
+        }
     }
 }

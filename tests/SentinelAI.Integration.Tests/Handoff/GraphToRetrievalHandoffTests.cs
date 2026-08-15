@@ -22,11 +22,14 @@ public class GraphToRetrievalHandoffTests
 
         await pipeline.RunAsync([HandoffFixture.SeededFinding()], HandoffFixture.Tenant, HandoffFixture.Job);
 
-        var (query, collection) = Assert.Single(retriever.Calls);
+        // One call per retrieving agent since SEC-23 — Red against offense, Blue against defense.
+        Assert.Equal(2, retriever.Calls.Count);
+
+        var (query, _) = retriever.Calls[0];
 
         // Keyed on the identifier the corpus can match exactly.
         Assert.StartsWith("CWE-502", query, StringComparison.Ordinal);
-        Assert.Equal(ThinSlicePipeline.Collection, collection);
+        Assert.Equal(["offense", "defense"], retriever.Calls.Select(c => c.Collection));
 
         // None of the scanner's structural boilerplate leaks into the query: not the tool name,
         // not the rule/check id, not the SARIF severity word, not a source path.
