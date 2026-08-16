@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using SentinelAI.Application.Features.Scan.Graph;
 using SentinelAI.Application.Features.Scan.ThinSlice;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
@@ -19,6 +20,7 @@ public sealed class RunAuditStageCommandHandler(
     IUnitOfWork unitOfWork,
     ICallerContext caller,
     ThinSlicePipeline pipeline,
+    ChainOutcomeWriter chainOutcomeWriter,
     ILogger<RunAuditStageCommandHandler> logger)
     : IRequestHandler<RunAuditStageCommand, Response>
 {
@@ -69,6 +71,11 @@ public sealed class RunAuditStageCommandHandler(
             // own record, and rebuilding CandidateChain objects from them here would duplicate
             // SEC-20's traversal with no new information. The debate reasons over the graph.
             var result = await pipeline.RunAsync(findings, tenantId, job.Id, nodes, edges, candidates: null, ct);
+
+            // SEC-28: the graph stage's own chain row otherwise stays "candidate" forever — a
+            // reader of the chains endpoint could never tell a chain the debate validated from
+            // one nobody has looked at yet.
+            await chainOutcomeWriter.ApplyAsync(job.Id, result.Audit, ct);
 
             await AdvanceStageAsync(job, ScanStage.Report, failure: null);
 

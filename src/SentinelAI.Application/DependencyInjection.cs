@@ -57,6 +57,11 @@ public static class DependencyInjection
         services.AddScoped<Features.Scan.Graph.ExploitChainTraverser>();
         services.AddScoped<Features.Scan.Graph.CandidateChainWriter>();
 
+        // SEC-28: promotes the audit stage's outcome onto the top-priority chain row the graph
+        // stage left at Candidate, so GET /v1/scans/{id}/chains reflects what Red and Blue
+        // actually concluded rather than showing every chain untouched forever.
+        services.AddScoped<Features.Scan.Graph.ChainOutcomeWriter>();
+
         // The graph stage as one callable unit — the four seam writers plus SEC-20 over one
         // ingested bundle. POST /v1/scans/{id}/graph is its only caller today; a queue-driven
         // worker takes it over when one exists.
