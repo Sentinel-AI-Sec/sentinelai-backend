@@ -5,8 +5,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using SentinelAI.Application.Abstractions;
 using SentinelAI.Infrastructure.Agents.Providers;
 using SentinelAI.Infrastructure.Data;
+using SentinelAI.Infrastructure.Knowledge;
 
 namespace SentinelAI.Integration.Tests.Auth;
 
@@ -47,6 +49,14 @@ public sealed class ScanApiFactory : WebApplicationFactory<Program>
                 ["SentinelAI:Models:Agents:Red:ApiKey"] = "",
                 ["SentinelAI:Models:Agents:Blue:ApiKey"] = "",
                 ["SentinelAI:Models:Agents:Reporter:ApiKey"] = "",
+
+                // Same argument, for the corpus. appsettings.json ships a non-empty
+                // Knowledge:Endpoint (localhost:6334), which AddInfrastructureServices reads as
+                // "a corpus is configured" and swaps SeedKnowledgeRetriever for the real
+                // Qdrant-backed one — so every test that reaches a debate tried to open a gRPC
+                // channel to a Qdrant nobody started.
+                ["Knowledge:Endpoint"] = "",
+                ["Knowledge:ApiKey"] = "",
             });
         });
 
@@ -84,6 +94,18 @@ public sealed class ScanApiFactory : WebApplicationFactory<Program>
             // not. The provider is a test-host concern exactly like the database is.
             services.RemoveAll<IChatClientFactory>();
             services.AddSingleton<IChatClientFactory>(_ => new ChatClientFactory(new ModelProviderOptions()));
+
+            // And the offline retriever, for the same reason the configuration override above
+            // is not trusted on its own: AddInfrastructureServices decides which
+            // IKnowledgeRetriever to register by reading Knowledge:Endpoint at registration
+            // time, before a test configuration source is guaranteed to be in the builder.
+            // Replacing the built registration is what actually takes effect.
+            //
+            // A live corpus is a genuine external dependency, and these tests are about the
+            // API surface — the corpus itself is proven by LiveCorpusSmokeTests, which builds
+            // its own container and skips when no corpus is reachable.
+            services.RemoveAll<IKnowledgeRetriever>();
+            services.AddScoped<IKnowledgeRetriever, SeedKnowledgeRetriever>();
         });
     }
 
