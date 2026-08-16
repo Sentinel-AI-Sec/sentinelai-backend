@@ -154,10 +154,22 @@ jobs:
           echo "No API key literals found."
 
       - name: Fail if a connection-string password was committed
+        # Two exclusions, both deliberate — without them this step is permanently red and
+        # therefore ignored, which is worse than not having it.
+        #
+        #   RegexSecretScannerTests owns fake credentials by design: they are the fixtures that
+        #   prove the ingress redaction gate catches this exact pattern. Excluding the file is
+        #   narrower than loosening the pattern everything else is checked with.
+        #
+        #   `Password=<pw>` / `${DB_PASSWORD}` / `Password=***` are documentation placeholders.
+        #   A value that names itself as a value to be filled in is not a leaked one.
         run: |
           hits=$(git grep -nIE '(Password|pwd)=[^;"[:space:]]+' \
                  -- '*.json' '*.cs' '*.yaml' '*.yml' \
-                 ':(exclude).github/workflows/*' || true)
+                 ':(exclude).github/workflows/*' \
+                 ':(exclude)tests/SentinelAI.Infrastructure.Tests/Security/RegexSecretScannerTests.cs' \
+                 | grep -viE '(Password|pwd)=(<[^>]*>|\$\{[^}]*\}|%[^%]*%|\*+|your[_-]|change[_-]?me)' \
+                 || true)
           if [ -n "$hits" ]; then
             echo "::error::Possible connection-string password committed:"
             echo "$hits"
