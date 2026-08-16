@@ -37,6 +37,10 @@ public sealed class BlueTeamExecutor(AIAgent agent, ModelTier tier = ModelTier.H
         and a hop you merely could not check does not break the chain. Only a REFUTED hop
         breaks it.
 
+        For a CONFIRMED hop, name the specific evidence — the node, finding or config detail —
+        that confirms it. A CONFIRMED hop with no named evidence is not confirmed, it is
+        asserted twice.
+
         Be terse: at most one short line per hop, each ending in CONFIRMED, UNRESOLVED or
         REFUTED. No preamble, no restating the chain.
 

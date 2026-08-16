@@ -143,6 +143,26 @@ public class DebateAcceptanceTests
         Assert.Equal(DebateOutcome.Converged, result.Audit!.Outcome);
     }
 
+    // SEC-27's evidence AC: a hop Blue marks CONFIRMED must carry the evidence that confirms
+    // it through to the Reporter, not just the verdict token — otherwise the Reporter's own
+    // citation requirement (SEC-28) has nothing per-hop to point at.
+    [Fact]
+    public async Task Blues_confirmed_evidence_survives_to_reach_the_reporter()
+    {
+        var debate = TestDebate.Create(
+            blue: (_, _) =>
+                """
+                hop 1: role attaches to task per infra/main.tf:12. CONFIRMED
+                VERDICT: CHAIN_HOLDS
+                """);
+
+        var result = await new DebateRunner(debate.Workflow).RunAsync(ScanBrief.Stub());
+
+        Assert.NotNull(result.Audit);
+        var blueTurn = Assert.Single(result.Audit!.Transcript, t => t.Role == AgentRole.Blue);
+        Assert.Contains("infra/main.tf:12", blueTurn.Content, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Unresolved_join_is_surfaced_not_dropped()
     {
