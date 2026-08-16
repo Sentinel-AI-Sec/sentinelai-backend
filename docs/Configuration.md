@@ -246,3 +246,71 @@ specific failure that a real model will not reproduce on demand.
 Expect **90–140 seconds** for a live run: the calls are sequential and non-streaming, so
 nothing prints while an agent is thinking. The spinner shows it is alive. See
 [Live_Model_Findings.md §6](Live_Model_Findings.md) for measured latency.
+
+---
+
+## 6. The knowledge corpus (SEC-22)
+
+Retrieval reads two Qdrant collections, `offense` and `defense`, that Pipeline A
+(`sentinelai-knowledge`) produced. Pipeline B only ever reads them.
+
+```yaml
+Knowledge:
+  Endpoint: https://<cluster>.cloud.qdrant.io:6334   # gRPC, not the 6333 REST port
+  ApiKey: "<cluster key>"                            # empty for a local container
+  Embedder:
+    BaseUrl: ""                                      # optional — see 6.2
+```
+
+**The endpoint alone turns SEC-22 on.** With it set, the real decision tree answers; without it,
+the walking-skeleton stub does and warns on every call.
+
+> **Port 6334, not 6333.** The .NET client speaks gRPC. Pointing it at the REST port gives a
+> protocol error rather than a message about the wrong port.
+
+### 6.1 The embedder is optional
+
+| Mode | Fires when | Needs a model? |
+|---|---|---|
+| Exact filter | The finding carries a clean CVE or CWE | **No** — a payload filter, no vector involved |
+| Semantic | No clean id, dense-only embedder | Yes |
+| Hybrid | No clean id, embedder has a lexical head | Yes |
+
+A corpus with no embedder is a **supported configuration, not a degraded one**. Findings carrying
+an identifier — most of them, once SEC-15's rule-mapping table has run — ground against the real
+corpus. Findings without one record an honest miss (`no embedding model is configured`) rather
+than falling back to canned text or crashing the scan.
+
+Set `Knowledge:Embedder:BaseUrl` when you want the meaning-based arms; see
+`sentinelai-knowledge/service/README.md` for standing that service up.
+
+### 6.2 Proving it is the real corpus, not the stub
+
+The stub answers for CWE-502 too, so "chunks came back" is not evidence. Two things distinguish
+them: a real chunk carries a `chunk_id` and a `corpus_version`, and the stub logs a warning on
+every single call.
+
+```bash
+$env:SENTINELAI_CORPUS_URL="https://<cluster>.cloud.qdrant.io:6334"
+```
+
+```bash
+$env:SENTINELAI_CORPUS_KEY="<key>"; dotnet test tests/SentinelAI.Integration.Tests --filter "FullyQualifiedName~LiveCorpusSmokeTests"
+```
+
+Four read-only tests against the live corpus. They assert the container hands back the real
+retriever, that a CWE lookup returns the weakness definition rather than the CVEs tagged with it,
+and that what came back carries a corpus version.
+
+### 6.3 The adapter tests need a throwaway instance
+
+`QdrantKnowledgeSearchTests` **creates and deletes collections named exactly `offense` and
+`defense`**. Never point it at a populated corpus — it would destroy it.
+
+```bash
+docker run -d --rm --name qdrant-test -p 6344:6333 -p 6345:6334 qdrant/qdrant
+```
+
+```bash
+$env:SENTINELAI_QDRANT="http://localhost:6345"; dotnet test tests/SentinelAI.Integration.Tests
+```

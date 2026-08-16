@@ -13,6 +13,7 @@ using SentinelAI.Domain.ValueObjects;
 using SentinelAI.Infrastructure.Agents.Orchestration;
 using SentinelAI.Infrastructure.Agents.Providers;
 using SentinelAI.Infrastructure.Knowledge;
+using SentinelAI.Integration.Tests.Scan;
 
 namespace SentinelAI.Integration.Tests.Handoff;
 
@@ -98,19 +99,30 @@ internal static class HandoffFixture
             new ScanBriefRenderer(),
             debate ?? RealDebateOffline(),
             new ReportBuilder(),
+            new FakeScanRetentionPolicy(),
             NullLogger<ThinSlicePipeline>.Instance);
 }
 
 /// <summary>Records every query the pipeline builds, so a boundary test can assert its shape.</summary>
 internal sealed class CapturingRetriever(params string[] canned) : IKnowledgeRetriever
 {
+    private readonly RetrievalQueryBuilder _queries = new();
+
     public List<(string Query, string Collection)> Calls { get; } = [];
 
-    public Task<IReadOnlyList<string>> RetrieveAsync(string query, string collection, CancellationToken ct = default)
+    public Task<RetrievalResult> RetrieveAsync(
+        Finding finding, RetrievalIntent intent, CancellationToken ct = default)
     {
-        Calls.Add((query, collection));
-        IReadOnlyList<string> result = canned.Length > 0 ? canned : ["[CWE-502] canned knowledge chunk"];
-        return Task.FromResult(result);
+        // Rebuilt with the real builder: the seam carries the finding now, but what these tests
+        // assert on is still the query text SEC-21 produces for it.
+        Calls.Add((_queries.Build(finding) ?? string.Empty, intent.Collection().Wire()));
+
+        var texts = canned.Length > 0 ? canned : ["[CWE-502] canned knowledge chunk"];
+
+        return Task.FromResult(new RetrievalResult(
+            finding.Id, RetrievalMode.ExactFilter,
+            [.. texts.Select((x, i) => new KnowledgeChunk($"canned-{i}", KnowledgeSource.Cwe, "canned", x, 0f))],
+            []));
     }
 }
 

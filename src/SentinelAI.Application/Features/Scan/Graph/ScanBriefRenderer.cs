@@ -1,4 +1,5 @@
 using System.Text;
+using SentinelAI.Application.Features.Scan.Retrieval;
 using SentinelAI.Domain.Models;
 
 namespace SentinelAI.Application.Features.Scan.Graph;
@@ -38,6 +39,12 @@ namespace SentinelAI.Application.Features.Scan.Graph;
 /// </remarks>
 public sealed class ScanBriefRenderer
 {
+    /// <summary>
+    /// Renders the brief, with each agent's knowledge under its own heading (SEC-23).
+    /// </summary>
+    /// <param name="knowledgeByRole">What each agent retrieved. Red's came from the offense
+    /// collection and Blue's from defense, so they are labelled rather than merged — a mitigation
+    /// listed among attacker knowledge reads to Red as a technique.</param>
     /// <param name="edges">
     /// The edges of the graph the nodes came from. Null or empty renders the explicit
     /// "none were extracted, do not infer one" policy; anything else is listed in full.
@@ -46,7 +53,7 @@ public sealed class ScanBriefRenderer
         Guid scanJobId,
         IReadOnlyList<Finding> findings,
         IReadOnlyList<GraphNode> nodes,
-        IReadOnlyList<string> knowledge,
+        IReadOnlyDictionary<AgentRole, IReadOnlyList<string>> knowledgeByRole,
         IReadOnlyList<GraphEdge>? edges = null)
     {
         var sb = new StringBuilder();
@@ -78,11 +85,18 @@ public sealed class ScanBriefRenderer
         sb.AppendLine();
         AppendEdges(sb, nodes, edges);
 
-        if (knowledge.Count > 0)
+        // One section per agent, named by the question it asked. Red must be able to tell its
+        // own attacker knowledge from Blue's remediation guidance; a single merged list would
+        // hand both agents the other's answers and quietly undo the offense/defense split.
+        foreach (var role in AgentRetrieval.RetrievingRoles)
         {
+            if (!knowledgeByRole.TryGetValue(role, out var chunks) || chunks.Count == 0) continue;
+
             sb.AppendLine();
-            sb.AppendLine("Knowledge retrieved for these findings:");
-            foreach (var chunk in knowledge)
+            sb.Append("Knowledge retrieved for ").Append(role).Append(" (")
+              .Append(AgentRetrieval.CollectionFor(role)!.Value.Wire()).AppendLine("):");
+
+            foreach (var chunk in chunks)
                 sb.Append("  - ").AppendLine(OneLine(chunk));
         }
 
@@ -161,4 +175,35 @@ public sealed class ScanBriefRenderer
     /// </summary>
     private static string OneLine(string text) =>
         string.Join(" ", text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+    /// <summary>
+    /// Renders with one undifferentiated knowledge list, attributed to Red.
+    /// </summary>
+    /// <remarks>
+    /// For callers that retrieve once rather than per agent. Attributed rather than left
+    /// unlabelled because an unattributed block reads to both agents as theirs, which is the
+    /// merge SEC-23 exists to undo.
+    /// </remarks>
+    public ScanBrief Render(
+        Guid scanJobId,
+        IReadOnlyList<Finding> findings,
+        IReadOnlyList<GraphNode> nodes,
+        IReadOnlyList<string> knowledge) =>
+        Render(scanJobId, findings, nodes,
+            new Dictionary<AgentRole, IReadOnlyList<string>> { [AgentRole.Red] = knowledge });
+
+    /// <summary>
+    /// Renders with one undifferentiated knowledge list, attributed to Red, over a graph whose
+    /// edges are already known (SEC-34) — the graph-stage handler's caller, which has just read
+    /// the persisted graph back and has no per-role retrieval to report.
+    /// </summary>
+    public ScanBrief Render(
+        Guid scanJobId,
+        IReadOnlyList<Finding> findings,
+        IReadOnlyList<GraphNode> nodes,
+        IReadOnlyList<string> knowledge,
+        IReadOnlyList<GraphEdge>? edges) =>
+        Render(scanJobId, findings, nodes,
+            new Dictionary<AgentRole, IReadOnlyList<string>> { [AgentRole.Red] = knowledge },
+            edges);
 }

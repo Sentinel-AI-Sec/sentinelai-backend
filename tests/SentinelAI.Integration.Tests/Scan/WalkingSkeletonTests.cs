@@ -59,6 +59,7 @@ public class WalkingSkeletonTests
             new ScanBriefRenderer(),
             debate ?? new ScriptedDebate(),
             new ReportBuilder(),
+            new FakeScanRetentionPolicy(),
             NullLogger<ThinSlicePipeline>.Instance);
 
     // ---- Acceptance box 1: one finding travels all five stages -----------------------------
@@ -108,13 +109,18 @@ public class WalkingSkeletonTests
         var spy = new SpyRetriever();
         var pipeline = new ThinSlicePipeline(
             new GraphSeeder(), new RetrievalQueryBuilder(), spy, new ScanBriefRenderer(),
-            new ScriptedDebate(), new ReportBuilder(), NullLogger<ThinSlicePipeline>.Instance);
+            new ScriptedDebate(), new ReportBuilder(), new FakeScanRetentionPolicy(), NullLogger<ThinSlicePipeline>.Instance);
 
         await pipeline.RunAsync([SeededFinding()], Tenant, Job);
 
-        var query = Assert.Single(spy.Queries);
-        Assert.StartsWith("CWE-502", query.Text, StringComparison.Ordinal);
-        Assert.Equal(ThinSlicePipeline.Collection, query.Collection);
+        // Two queries for one finding since SEC-23: Red asks offense, Blue asks defense. Same
+        // question, both halves of the corpus — the split is by role, never by tool.
+        Assert.Equal(2, spy.Queries.Count);
+        Assert.All(spy.Queries, q => Assert.StartsWith("CWE-502", q.Text, StringComparison.Ordinal));
+
+        Assert.Equal(
+            ["offense", "defense"],
+            spy.Queries.Select(q => q.Collection));
     }
 
     [Fact]
@@ -254,15 +260,29 @@ public class WalkingSkeletonTests
 
     private sealed record RetrievalCall(string Text, string Collection);
 
+    /// <summary>
+    /// Records what SEC-21 would build for each finding the pipeline seeds retrieval with.
+    /// </summary>
+    /// <remarks>
+    /// The seam carries the finding now, not a pre-built string, because the exact-filter arm
+    /// needs the identifiers as values. The query is rebuilt here with the same builder the real
+    /// retriever uses, so these assertions still describe the text that reaches the corpus.
+    /// </remarks>
     private sealed class SpyRetriever : IKnowledgeRetriever
     {
+        private readonly RetrievalQueryBuilder _queries = new();
+
         public List<RetrievalCall> Queries { get; } = [];
 
-        public Task<IReadOnlyList<string>> RetrieveAsync(
-            string query, string collection, CancellationToken ct = default)
+        public Task<RetrievalResult> RetrieveAsync(
+            Finding finding, RetrievalIntent intent, CancellationToken ct = default)
         {
-            Queries.Add(new RetrievalCall(query, collection));
-            return Task.FromResult<IReadOnlyList<string>>(["[CWE-502] canned"]);
+            Queries.Add(new RetrievalCall(_queries.Build(finding) ?? string.Empty, intent.Collection().Wire()));
+
+            return Task.FromResult(new RetrievalResult(
+                finding.Id, RetrievalMode.ExactFilter,
+                [new KnowledgeChunk("CWE-502", KnowledgeSource.Cwe, "CWE-502", "canned", 0f)],
+                []));
         }
     }
 }

@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
 using SentinelAI.Application.Abstractions;
+using SentinelAI.Application.Features.Scan.Retrieval;
+using SentinelAI.Domain.Models;
 
 namespace SentinelAI.Infrastructure.Knowledge;
 
@@ -66,25 +68,52 @@ public sealed class SeedKnowledgeRetriever(ILogger<SeedKnowledgeRetriever> logge
                 "OWASP A01:2021 — Broken Access Control. Enable public access blocks and prefer explicit deny."),
         };
 
-    public Task<IReadOnlyList<string>> RetrieveAsync(
-        string query, string collection, CancellationToken ct = default)
+    /// <summary>
+    /// Answers from the canned map, or returns an empty result when the key is unknown.
+    /// </summary>
+    /// <remarks>
+    /// Reads the identifiers straight off the finding now that the seam carries it, rather than
+    /// hunting for them inside a query string. Same answers, one less thing to get wrong.
+    /// </remarks>
+    public Task<RetrievalResult> RetrieveAsync(
+        Finding finding, RetrievalIntent intent, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(finding);
 
         logger.LogWarning(
-            "SeedKnowledgeRetriever answered a retrieval for {Collection} from canned data. "
-            + "This is the SEC-45 walking-skeleton stub, not a corpus — replace it with the "
-            + "Qdrant retriever (SEC-09) before any result is shown to a user",
-            collection);
+            "SeedKnowledgeRetriever answered a retrieval for {Intent} from canned data. "
+            + "This is the SEC-45 walking-skeleton stub, not a corpus - configure Knowledge:Endpoint "
+            + "and Knowledge:Embedder:BaseUrl to use the real one (SEC-22)",
+            intent);
 
-        var key = Chunks.Keys.FirstOrDefault(k => query.Contains(k, StringComparison.OrdinalIgnoreCase));
+        var key = new[] { finding.CweId, finding.CveId }
+            .FirstOrDefault(k => k is not null && Chunks.ContainsKey(k));
+
         if (key is null)
-            return Task.FromResult<IReadOnlyList<string>>([]);
+        {
+            return Task.FromResult(new RetrievalResult(
+                finding.Id, RetrievalMode.None, [],
+                [RetrievalMiss.Ungrounded(finding.NodeRef)]));
+        }
 
         var (offense, defense) = Chunks[key];
-        var chunk = string.Equals(collection, Defense, StringComparison.OrdinalIgnoreCase) ? defense : offense;
+        var text = intent.Collection() == KnowledgeCollection.Defense ? defense : offense;
 
-        return Task.FromResult<IReadOnlyList<string>>([$"[{key}] {chunk}"]);
+        // Score 0: the stub matches an id, it does not rank. Reporting a similarity it never
+        // computed would make canned data indistinguishable from a real hit downstream.
+        var chunk = new KnowledgeChunk(
+            // The bare key, unchanged: the chunk id IS the citation key, and prefixing it
+            // would silently rewrite every citation the skeleton has ever produced.
+            ChunkId: key,
+            Source: KnowledgeSource.Cwe,
+            Title: key,
+            Text: text,
+            Score: 0f,
+            CorpusVersion: "seed-stub",
+            CweId: key.StartsWith("CWE", StringComparison.OrdinalIgnoreCase) ? key : null);
+
+        return Task.FromResult(new RetrievalResult(
+            finding.Id, RetrievalMode.ExactFilter, [chunk], []));
     }
 
     /// <summary>The linking keys this stub can answer for — used by tests and diagnostics.</summary>

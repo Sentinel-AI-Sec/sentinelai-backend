@@ -75,7 +75,63 @@ public static class DependencyInjection
         // corpus exists. It logs a warning on every call. Replacing it with the Qdrant
         // retriever (SEC-09) is a change to this line and nothing upstream — which is the
         // property the thin slice was built to establish.
-        services.AddScoped<IKnowledgeRetriever, SeedKnowledgeRetriever>();
+
+        // ---- SEC-22: the retrieval decision tree ------------------------------------------
+        // The tree lives in Application and is pure; these are the two ports it needs. It takes
+        // SEC-21's RetrievalQueryBuilder for the query text, so there is one query builder.
+        // QdrantKnowledgeSearch is a singleton because QdrantClient is designed to be shared and
+        // multiplexes over one gRPC channel.
+        services.Configure<QdrantOptions>(configuration.GetSection(QdrantOptions.SectionName));
+        services.AddSingleton<QdrantKnowledgeSearch>();
+        services.AddSingleton<IKnowledgeSearch>(sp => sp.GetRequiredService<QdrantKnowledgeSearch>());
+
+        // BGE-M3 over HTTP when a service URL is configured, and an embedder that throws when it
+        // is not. Never a stub returning arbitrary vectors: that would ground the debate in
+        // near-random chunks and report success. The exact-filter arm needs no embedder at all.
+        services.Configure<EmbedderServiceOptions>(configuration.GetSection(EmbedderServiceOptions.SectionName));
+
+        var embedder = configuration.GetSection(EmbedderServiceOptions.SectionName).Get<EmbedderServiceOptions>();
+
+        if (embedder?.IsConfigured == true)
+        {
+            services.AddHttpClient<IQueryEmbedder, HttpQueryEmbedder>();
+            services.AddHostedService<KnowledgeReadinessService>();
+        }
+        else
+        {
+            services.AddSingleton<IQueryEmbedder, NotConfiguredQueryEmbedder>();
+        }
+
+        services.AddScoped<Application.Features.Scan.Retrieval.KnowledgeRetrievalService>();
+
+        // THE SWAP. Which retriever answers the pipeline is a configuration decision, not a code
+        // one — the property the walking skeleton's seam was built to give us.
+        //
+        //   corpus configured -> SEC-22's decision tree, against the real corpus
+        //   no corpus         -> the canned stub, which warns on every call
+        //
+        // The corpus alone is enough, and the embedder is genuinely optional. Looking up CWE-502
+        // by its id is a payload filter with no vector in it, so an identifier-carrying finding
+        // grounds for real whether or not a model exists. Without an embedder the meaning-based
+        // arms report an honest miss per finding (see IQueryEmbedder.IsAvailable) rather than
+        // returning canned text — so this is never the silent half-and-half it would be if the
+        // fallback were the stub.
+        var corpusReady = !string.IsNullOrWhiteSpace(configuration[$"{QdrantOptions.SectionName}:Endpoint"]);
+
+        if (corpusReady)
+        {
+            services.AddScoped<IKnowledgeRetriever>(sp =>
+                sp.GetRequiredService<Application.Features.Scan.Retrieval.KnowledgeRetrievalService>());
+        }
+        else
+        {
+            services.AddScoped<IKnowledgeRetriever, SeedKnowledgeRetriever>();
+        }
+
+        // ---- SEC-35: account deletion ----------------------------------------------------
+        // Infrastructure, not Application: the delete order it enforces is a property of the
+        // relational schema's Restrict foreign keys, which nothing above this layer knows about.
+        services.AddScoped<ITenantPurge, TenantPurgeService>();
 
         services.AddScoped<IScanJobRepository, ScanJobRepository>();
         services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));

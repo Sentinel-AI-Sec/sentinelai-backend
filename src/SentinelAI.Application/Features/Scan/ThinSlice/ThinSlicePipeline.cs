@@ -33,10 +33,23 @@ public sealed class ThinSlicePipeline(
     ScanBriefRenderer briefRenderer,
     IDebateEngine debate,
     ReportBuilder reportBuilder,
+    IScanRetentionPolicy retention,
     ILogger<ThinSlicePipeline> logger)
 {
     /// <summary>The collection the offensive knowledge is retrieved from (SEC-09).</summary>
+    /// <remarks>Kept as a string because <c>ReportBuilder</c> stamps it on every citation.</remarks>
     public const string Collection = "offense";
+
+    /// <summary>
+    /// What the skeleton asks the corpus, per agent (SEC-23).
+    /// </summary>
+    /// <remarks>
+    /// Red asks the attacker question against offense and Blue the remediation question against
+    /// defense, so each is grounded in the half of the corpus its job needs. Which collection
+    /// that is comes from <see cref="AgentRetrieval"/> — never from which tool reported the
+    /// finding, which is the split SEC-23 exists to prevent.
+    /// </remarks>
+    public static IReadOnlyList<AgentRole> RetrievingRoles => AgentRetrieval.RetrievingRoles;
 
     /// <summary>
     /// How many findings seed retrieval. The debate reasons over a bounded brief — AID-01 §3.2
@@ -70,23 +83,41 @@ public sealed class ThinSlicePipeline(
         var nodes = GraphFor(findings, graph, tenantId, scanJobId);
         var handoff = AttackGraphHandoff.From(tenantId, scanJobId, candidates ?? []);
 
-        // ---- Stage 3: retrieve ------------------------------------------------------------
-        var knowledge = await RetrieveAsync(findings, handoff, ct);
+        // ---- Stage 3: retrieve, once per agent (SEC-23) -----------------------------------
+        var byRole = new Dictionary<AgentRole, IReadOnlyList<string>>();
+        foreach (var role in RetrievingRoles)
+            byRole[role] = await RetrieveAsync(findings, handoff, role, ct);
+
+        // The union, for the report's citations: a chunk cited by either agent is knowledge the
+        // audit rests on, and the report does not care which of them fetched it.
+        var knowledge = byRole.Values
+            .SelectMany(chunks => chunks)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
 
         // ---- Stage 4: debate --------------------------------------------------------------
-        var brief = briefRenderer.Render(scanJobId, findings, nodes, knowledge);
+        var brief = briefRenderer.Render(scanJobId, findings, nodes, byRole);
         var audit = await debate.RunAsync(brief, ct);
 
         // ---- Stage 5: report --------------------------------------------------------------
         var report = reportBuilder.Build(
             audit, knowledge, tenantId, scanJobId, Collection, DateTime.UtcNow);
 
+        // ---- Stage 6: retention (SEC-35) --------------------------------------------------
+        // The audit exists, so the customer's bundle has served its purpose and goes now — not
+        // when somebody remembers to call the purge endpoint. Deleting by default is the whole
+        // promise; making it a step of the pipeline rather than a follow-up call is what stops
+        // "we delete your data" from depending on an operator's memory.
+        var retentionOutcome = await retention.ApplyAfterAuditAsync(tenantId, scanJobId, report, ct);
+
         logger.LogInformation(
             "Thin slice for job {JobId}: {Findings} finding(s) -> {Nodes} node(s) -> "
             + "{Candidates} candidate chain(s) -> {Chunks} knowledge chunk(s) -> debate {Outcome} "
-            + "in {Rounds} round(s) -> report with {Citations} citation(s)",
+            + "in {Rounds} round(s) -> report with {Citations} citation(s); bundle purged, "
+            + "report {Fate}",
             scanJobId, findings.Count, nodes.Count, handoff.Candidates.Count, knowledge.Count,
-            audit.Outcome, audit.Rounds, report.Citations.Count);
+            audit.Outcome, audit.Rounds, report.Citations.Count,
+            retentionOutcome.ReportRetained ? "retained" : "discarded");
 
         return new ThinSliceResult
         {
@@ -97,6 +128,7 @@ public sealed class ThinSlicePipeline(
             Brief = brief,
             Audit = audit,
             Report = report,
+            Retention = retentionOutcome,
         };
     }
 
@@ -150,7 +182,8 @@ public sealed class ThinSlicePipeline(
     /// table exists to close.
     /// </remarks>
     private async Task<IReadOnlyList<string>> RetrieveAsync(
-        IReadOnlyList<Finding> findings, AttackGraphHandoff handoff, CancellationToken ct)
+        IReadOnlyList<Finding> findings, AttackGraphHandoff handoff, AgentRole role,
+        CancellationToken ct)
     {
         var chunks = new List<string>();
         var seenQueries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -168,16 +201,21 @@ public sealed class ThinSlicePipeline(
             if (!seenQueries.Add(query))
                 continue;
 
-            foreach (var chunk in await retriever.RetrieveAsync(query, Collection, ct))
-                if (!chunks.Contains(chunk, StringComparer.Ordinal))
-                    chunks.Add(chunk);
+            // SEC-22's decision tree when a corpus is configured, the canned stub when it is
+            // not — the seam is the same either way, which is what the walking skeleton
+            // established it for.
+            var result = await retriever.RetrieveAsync(finding, AgentRetrieval.IntentFor(role)!.Value, ct);
+
+            foreach (var text in result.Chunks.Select(c => $"[{c.ChunkId}] {c.Text}"))
+                if (!chunks.Contains(text, StringComparer.Ordinal))
+                    chunks.Add(text);
         }
 
         if (unlinked > 0)
         {
             logger.LogInformation(
                 "{Count} of the seeded finding(s) carried no CWE or CVE, so nothing could be "
-                + "retrieved for them", unlinked);
+                + "retrieved for {Role}", unlinked, role);
         }
 
         return chunks;
