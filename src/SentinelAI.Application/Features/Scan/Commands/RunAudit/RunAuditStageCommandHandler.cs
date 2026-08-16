@@ -55,12 +55,20 @@ public sealed class RunAuditStageCommandHandler(
             .Where(n => n.ScanJobId == job.Id)
             .ToListAsync(ct);
 
+        // The graph stage's edges, read back alongside its nodes. Without these Red has no real
+        // hop to assert — the resource graph in the brief would say "no edges were extracted"
+        // even when SEC-17-20 built a real one, and the debate would run over nothing (SEC-26).
+        var edges = await unitOfWork.Repository<GraphEdge>()
+            .GetTableAsNotTracked()
+            .Where(e => e.ScanJobId == job.Id)
+            .ToListAsync(ct);
+
         try
         {
             // Candidate chains are left null: the persisted Chain rows are the graph stage's
             // own record, and rebuilding CandidateChain objects from them here would duplicate
             // SEC-20's traversal with no new information. The debate reasons over the graph.
-            var result = await pipeline.RunAsync(findings, tenantId, job.Id, nodes, candidates: null, ct);
+            var result = await pipeline.RunAsync(findings, tenantId, job.Id, nodes, edges, candidates: null, ct);
 
             await AdvanceStageAsync(job, ScanStage.Report, failure: null);
 

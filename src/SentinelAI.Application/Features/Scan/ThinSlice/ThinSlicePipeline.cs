@@ -63,6 +63,14 @@ public sealed class ThinSlicePipeline(
     /// findings" — see <see cref="GraphFor"/>, which is where the difference between the two
     /// callers of this pipeline lives.
     /// </param>
+    /// <param name="edges">
+    /// The graph's edges, when <paramref name="graph"/> is the real one the graph stage built.
+    /// Null or empty renders the brief's explicit "no edges, do not infer one" policy — which is
+    /// correct for the walking skeleton's seeded nodes, and wrong for a real graph that simply
+    /// was not passed one. There is no seeded fallback for this parameter the way there is for
+    /// <paramref name="graph"/>: the seeder produces nodes with no structural relationship
+    /// between them, so a fabricated edge would be a fabricated hop (SEC-26).
+    /// </param>
     /// <param name="candidates">
     /// The candidate chains SEC-20's traverser found over that graph, when it has run. Null or
     /// empty produces an empty <see cref="AttackGraphHandoff"/> rather than none — the walking
@@ -74,6 +82,7 @@ public sealed class ThinSlicePipeline(
         Guid tenantId,
         Guid scanJobId,
         IReadOnlyList<GraphNode>? graph = null,
+        IReadOnlyList<GraphEdge>? edges = null,
         IReadOnlyList<CandidateChain>? candidates = null,
         CancellationToken ct = default)
     {
@@ -96,7 +105,10 @@ public sealed class ThinSlicePipeline(
             .ToList();
 
         // ---- Stage 4: debate --------------------------------------------------------------
-        var brief = briefRenderer.Render(scanJobId, findings, nodes, byRole);
+        // Edges from the caller's real graph only — never from the seeder's fallback nodes,
+        // which is what keeps "no graph stage ran yet" and "the graph stage ran and found no
+        // edges" from being confused with each other.
+        var brief = briefRenderer.Render(scanJobId, findings, nodes, byRole, graph is { Count: > 0 } ? edges : null);
         var audit = await debate.RunAsync(brief, ct);
 
         // ---- Stage 5: report --------------------------------------------------------------

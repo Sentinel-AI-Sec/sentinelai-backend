@@ -57,7 +57,7 @@ public class AttackGraphHandoffWiringTests
     /// Built the way <c>ExploitChainTraverser</c> builds one — real nodes, an edge on the second
     /// hop, findings attached, both slots empty.
     /// </summary>
-    private static (IReadOnlyList<GraphNode> Nodes, CandidateChain Chain, Finding OnPath) Candidate(
+    private static (IReadOnlyList<GraphNode> Nodes, CandidateChain Chain, Finding OnPath, GraphEdge Edge) Candidate(
         int severityOnPath)
     {
         var code = Node(NodeType.Code, "orderapp", Layer.Code);
@@ -85,16 +85,16 @@ public class AttackGraphHandoffWiringTests
             Confidence.Inferred,
             Priority: 1);
 
-        return ([code, bucket], chain, onPath);
+        return ([code, bucket], chain, onPath, edge);
     }
 
     [Fact]
     public async Task The_pipeline_carries_the_candidates_on_with_their_slots_still_empty()
     {
-        var (nodes, chain, onPath) = Candidate(severityOnPath: 4);
+        var (nodes, chain, onPath, _) = Candidate(severityOnPath: 4);
         var retriever = new CapturingRetriever();
 
-        var result = await Build(retriever).RunAsync([onPath], Tenant, Job, nodes, [chain]);
+        var result = await Build(retriever).RunAsync([onPath], Tenant, Job, nodes, candidates: [chain]);
 
         var handed = Assert.Single(result.Handoff.Candidates);
 
@@ -130,7 +130,7 @@ public class AttackGraphHandoffWiringTests
         // severe one sitting on nothing, because the debate reasons inside the candidates. Without
         // the handoff ordering the seeds, the severity-4 noise below fills the budget and the one
         // finding the debate can actually use retrieves nothing.
-        var (nodes, chain, onPath) = Candidate(severityOnPath: 1);
+        var (nodes, chain, onPath, _) = Candidate(severityOnPath: 1);
 
         var noise = Enumerable.Range(1, ThinSlicePipeline.RetrievalSeedCount)
             .Select(i => Finding(4, NodeId.Code($"unrelated{i}"), $"CWE-{i}00", $"Unrelated weakness {i}"))
@@ -138,7 +138,7 @@ public class AttackGraphHandoffWiringTests
 
         var retriever = new CapturingRetriever();
 
-        await Build(retriever).RunAsync([.. noise, onPath], Tenant, Job, nodes, [chain]);
+        await Build(retriever).RunAsync([.. noise, onPath], Tenant, Job, nodes, candidates: [chain]);
 
         // The seed budget is per agent, and since SEC-23 there are two of them — so the budget is
         // spent twice over, once against offense and once against defense. What matters is that
@@ -154,5 +154,62 @@ public class AttackGraphHandoffWiringTests
             Assert.Contains(retriever.Calls,
                 c => c.Collection == collection && c.Query.StartsWith("CWE-502", StringComparison.Ordinal));
         }
+    }
+
+    /// <summary>
+    /// SEC-26's precondition: when the graph stage has built real edges, Red's brief must carry
+    /// them, not the walking skeleton's "no edges" policy. This is the gap the audit-stage
+    /// handler used to have — it read the persisted nodes back but not the edges, so the real
+    /// pipeline rendered "none were extracted" even when SEC-17-20 had built a real graph.
+    /// </summary>
+    [Fact]
+    public async Task Reds_brief_carries_the_real_graphs_edges_when_the_caller_supplies_them()
+    {
+        var (nodes, _, onPath, edge) = Candidate(severityOnPath: 4);
+        var capture = new CapturingDebate();
+
+        var pipeline = new ThinSlicePipeline(
+            new GraphSeeder(),
+            new RetrievalQueryBuilder(),
+            new CapturingRetriever(),
+            new ScanBriefRenderer(),
+            capture,
+            new ReportBuilder(),
+            new FakeScanRetentionPolicy(),
+            NullLogger<ThinSlicePipeline>.Instance);
+
+        await pipeline.RunAsync([onPath], Tenant, Job, nodes, edges: [edge]);
+
+        var context = capture.Received!.Context;
+
+        Assert.Contains($"--{edge.Relation}-->", context, StringComparison.Ordinal);
+        Assert.DoesNotContain("none were extracted", context, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The seeder's fallback nodes carry no structural relationship to each other, so a graph
+    /// supplied without one (or none at all) must never borrow the caller's edges for it — that
+    /// would render hops between nodes the seeder invented, not ones the graph stage found.
+    /// </summary>
+    [Fact]
+    public async Task Edges_are_not_rendered_when_no_real_graph_was_supplied()
+    {
+        var (_, _, onPath, edge) = Candidate(severityOnPath: 4);
+        var capture = new CapturingDebate();
+
+        var pipeline = new ThinSlicePipeline(
+            new GraphSeeder(),
+            new RetrievalQueryBuilder(),
+            new CapturingRetriever(),
+            new ScanBriefRenderer(),
+            capture,
+            new ReportBuilder(),
+            new FakeScanRetentionPolicy(),
+            NullLogger<ThinSlicePipeline>.Instance);
+
+        // No graph passed — edges alone, with no real node set behind them, must not leak in.
+        await pipeline.RunAsync([onPath], Tenant, Job, edges: [edge]);
+
+        Assert.Contains("none were extracted", capture.Received!.Context, StringComparison.OrdinalIgnoreCase);
     }
 }
