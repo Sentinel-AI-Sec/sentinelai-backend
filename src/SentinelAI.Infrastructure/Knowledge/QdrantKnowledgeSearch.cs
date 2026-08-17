@@ -224,7 +224,12 @@ public sealed class QdrantKnowledgeSearch : IKnowledgeSearch, IDisposable
             CveId: Text(payload, CorpusFields.CveId),
             CweId: Text(payload, CorpusFields.CweId),
             CapecIds: List(payload, "capec_ids"),
-            TechniqueId: Text(payload, CorpusFields.TechniqueId));
+            TechniqueId: Text(payload, CorpusFields.TechniqueId),
+
+            // SEC-24's source metadata flag. Absent on ATT&CK, NVD and OWASP points, which is why
+            // ChunkQuality also reads the title — a null here is "this source has no status
+            // field", not "this entry is live".
+            Status: Text(payload, CorpusFields.Status));
     }
 
     private static string? Text(IReadOnlyDictionary<string, Value> payload, string key) =>

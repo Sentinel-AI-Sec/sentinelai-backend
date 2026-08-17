@@ -31,10 +31,17 @@ namespace SentinelAI.Application.Features.Scan.Retrieval;
 /// in-memory corpus rather than only against a live cluster.
 /// </para>
 /// <para>
+/// <b>SEC-24 rides on both arms.</b> Every chunk either arm returns goes through
+/// <see cref="ChunkQuality"/> before it becomes a result, and the semantic arm over-fetches so
+/// that dropping some still leaves <c>k</c>. The policy is that type's; this class only decides
+/// where it applies, which is everywhere, so there is no path from the corpus to the debate that
+/// skips it.
+/// </para>
+/// <para>
 /// <b>What it does not do:</b> it does not build the query text (SEC-21's
-/// <see cref="RetrievalQueryBuilder"/> does), does not decide which agent asks (SEC-23), does not
-/// filter deprecated entries (SEC-24), and does not measure coverage (SEC-25). It records the
-/// per-finding mode and the misses those stories need, and stops there.
+/// <see cref="RetrievalQueryBuilder"/> does), does not decide which agent asks (SEC-23), and does
+/// not measure coverage (SEC-25). It records the per-finding mode and the misses those stories
+/// need, and stops there.
 /// </para>
 /// </remarks>
 public sealed class KnowledgeRetrievalService(
@@ -70,26 +77,34 @@ public sealed class KnowledgeRetrievalService(
         // miss would throw away a weakness definition that is right there.
         if (cveId is not null)
         {
-            var chunks = await search.ExactAsync(ExactLookup.ForCve(cveId, collection), ct);
+            var exact = await ExactAsync(ExactLookup.ForCve(cveId, collection), cveId, misses, ct);
 
-            if (chunks.Count > 0)
-                return new RetrievalResult(finding.Id, RetrievalMode.ExactFilter, chunks, misses);
+            if (exact.Chunks.Count > 0)
+                return new RetrievalResult(finding.Id, RetrievalMode.ExactFilter, exact.Chunks, misses);
 
             // §7: coverage is partial by design. Report it — a silent fallback reads downstream
             // as a direct hit on the specific CVE, which is a claim the audit cannot support.
-            misses.Add(RetrievalMiss.CveNotInCorpus(cveId));
+            //
+            // Only when the corpus genuinely had nothing, though. If it held this CVE and SEC-24
+            // rejected every chunk, "not in the corpus" is false — the record exists and is
+            // retired — and ExactAsync has already recorded the miss that says so. Saying both
+            // would also set FellBackToWeaknessClass on a fallback that had a different cause.
+            if (!exact.EverythingDropped)
+            {
+                misses.Add(RetrievalMiss.CveNotInCorpus(cveId));
 
-            logger.LogInformation(
-                "{CveId} is not in the corpus; falling back to the weakness class for finding {FindingId}",
-                cveId, finding.Id);
+                logger.LogInformation(
+                    "{CveId} is not in the corpus; falling back to the weakness class for finding {FindingId}",
+                    cveId, finding.Id);
+            }
         }
 
         if (cweId is not null)
         {
-            var chunks = await search.ExactAsync(ExactLookup.ForCwe(cweId, collection), ct);
+            var exact = await ExactAsync(ExactLookup.ForCwe(cweId, collection), cweId, misses, ct);
 
-            if (chunks.Count > 0)
-                return new RetrievalResult(finding.Id, RetrievalMode.ExactFilter, chunks, misses);
+            if (exact.Chunks.Count > 0)
+                return new RetrievalResult(finding.Id, RetrievalMode.ExactFilter, exact.Chunks, misses);
         }
 
         if (cveId is null && cweId is null) misses.Add(RetrievalMiss.NoExactKey(finding.NodeRef));
@@ -118,13 +133,53 @@ public sealed class KnowledgeRetrievalService(
     }
 
     /// <summary>
+    /// The exact arm's one call, with SEC-24's guard on the way back.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// No over-fetch here, and none is needed: a payload filter matches rather than ranks, so it
+    /// returns every hit — a handful for a well-formed lookup — and there is no <c>k</c> to fall
+    /// short of. The guard only removes.
+    /// </para>
+    /// <para>
+    /// <b>An exact hit that is entirely deprecated falls through rather than being returned.</b>
+    /// Returning it would be the worst outcome available: a deterministic, top-ranked, confidently
+    /// cited chunk that the source itself has withdrawn. Falling through means the CWE arm, and
+    /// then meaning, still get their turn — and the miss records that something was there and was
+    /// rejected, so this does not read downstream as a corpus gap.
+    /// </para>
+    /// </remarks>
+    private async Task<QualityFiltered> ExactAsync(
+        ExactLookup lookup, string identifier, List<RetrievalMiss> misses, CancellationToken ct)
+    {
+        var filtered = ChunkQuality.Apply(await search.ExactAsync(lookup, ct));
+
+        if (filtered.AnyDropped) LogDropped(filtered.Dropped, lookup.ToString());
+
+        // The caller reads EverythingDropped to decide what the empty result means, so the miss is
+        // recorded here where the raw count is still known.
+        if (filtered.EverythingDropped) misses.Add(RetrievalMiss.NothingUsable(identifier, filtered.Dropped));
+
+        return filtered;
+    }
+
+    /// <summary>
     /// The meaning-based arm. Embeds SEC-21's query, then searches with the intent's mandatory
     /// filter.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The mode reported is <see cref="RetrievalMode.Hybrid"/> only when the embedder actually
     /// produced sparse weights. Reporting hybrid for a dense-only run would make SEC-25's "all
     /// three modes fire" assertion pass on a configuration where fusion never happened.
+    /// </para>
+    /// <para>
+    /// <b>SEC-24's over-fetch is here.</b> The query asks Qdrant for
+    /// <see cref="ChunkQuality.OverFetch"/> chunks and the guard trims the survivors back to
+    /// <see cref="SemanticQuery.DefaultTopK"/>, so entries dropped for quality are replaced by the
+    /// next-best live ones rather than leaving a short list. Asking for <c>k</c> and filtering
+    /// afterwards would return fewer than <c>k</c> — quietly, and exactly when the corpus is worst.
+    /// </para>
     /// </remarks>
     private async Task<RetrievalResult> SearchAsync(
         Finding finding, RetrievalIntent intent, List<RetrievalMiss> misses, CancellationToken ct)
@@ -137,7 +192,8 @@ public sealed class KnowledgeRetrievalService(
             return new RetrievalResult(finding.Id, RetrievalMode.None, [], misses);
         }
 
-        var semantic = intent.ToQuery(text);
+        const int topK = SemanticQuery.DefaultTopK;
+        var semantic = intent.ToQuery(text, ChunkQuality.OverFetch(topK));
 
         // No model in this deployment. The exact arm above already ran and found nothing, so
         // this finding is genuinely ungrounded — but it is ungrounded for a reason worth naming,
@@ -157,22 +213,43 @@ public sealed class KnowledgeRetrievalService(
 
         var vectors = await embedder.EmbedAsync(semantic.Text, ct);
 
-        var chunks = await search.SearchAsync(semantic, vectors, ct);
+        var filtered = ChunkQuality.Apply(await search.SearchAsync(semantic, vectors, ct), topK);
+        var chunks = filtered.Chunks;
         var mode = vectors.SupportsHybrid ? RetrievalMode.Hybrid : RetrievalMode.Semantic;
+
+        if (filtered.AnyDropped) LogDropped(filtered.Dropped, semantic.ToString());
 
         if (chunks.Count == 0)
         {
-            misses.Add(RetrievalMiss.Ungrounded(finding.NodeRef));
+            // Which of the two it was decides what somebody does about it: a stale corpus is
+            // re-ingested, a genuine gap is not.
+            misses.Add(filtered.EverythingDropped
+                ? RetrievalMiss.NothingUsable(finding.NodeRef, filtered.Dropped)
+                : RetrievalMiss.Ungrounded(finding.NodeRef));
 
             logger.LogWarning(
-                "Finding {FindingId} ({NodeRef}) retrieved nothing from {Collection}; it will be "
-                + "ungrounded in the audit", finding.Id, finding.NodeRef, semantic.Collection.Wire());
+                "Finding {FindingId} ({NodeRef}) retrieved nothing usable from {Collection}; it "
+                + "will be ungrounded in the audit", finding.Id, finding.NodeRef, semantic.Collection.Wire());
 
             return new RetrievalResult(finding.Id, RetrievalMode.None, [], misses, semantic.Text);
         }
 
         return new RetrievalResult(finding.Id, mode, chunks, misses, semantic.Text);
     }
+
+    /// <summary>
+    /// Says that SEC-24's guard fired.
+    /// </summary>
+    /// <remarks>
+    /// Warning, not debug. On a corpus Pipeline A built this never happens — its loaders drop
+    /// deprecated entries before they are embedded, and the live corpus has none of them — so a
+    /// drop here is not routine housekeeping. It means the corpus in use was built by something
+    /// else, or by an older loader, and every semantic result from it is suspect in a way no other
+    /// signal reports.
+    /// </remarks>
+    private void LogDropped(int dropped, string query) => logger.LogWarning(
+        "SEC-24 dropped {Dropped} deprecated or thin chunk(s) from {Query}. Pipeline A filters "
+        + "these at ingest, so a non-zero count here means the corpus is stale", dropped, query);
 
     /// <summary>
     /// The text to embed: SEC-21's query, or a sanitised message when SEC-21 declines to build one.
@@ -214,29 +291,32 @@ public sealed class KnowledgeRetrievalService(
     }
 
     /// <summary>
-    /// Logs grounding coverage and per-mode counts.
+    /// Logs SEC-25's grounding coverage and per-mode counts for this batch.
     /// </summary>
     /// <remarks>
-    /// SEC-25 turns this into an asserted metric. Logging it now costs nothing and means a run
-    /// that grounds two findings out of forty says so, rather than looking identical to a healthy
-    /// one until somebody reads the report.
+    /// <para>
+    /// The arithmetic belongs to <see cref="RetrievalEvaluation"/> and this only prints it, so the
+    /// number a test asserts on and the number a log reports are the same number. They were
+    /// computed twice before SEC-25, which is one definition too many for a metric whose whole
+    /// job is to be believed.
+    /// </para>
+    /// <para>
+    /// Logged per batch rather than per finding because coverage is a property of a run — a
+    /// single ungrounded finding says nothing on its own, and one line per finding buries the
+    /// ratio that does.
+    /// </para>
     /// </remarks>
     private void LogCoverage(IReadOnlyList<RetrievalResult> results, RetrievalIntent intent)
     {
         if (results.Count == 0) return;
 
-        var grounded = results.Count(r => r.IsGrounded);
-        var byMode = results.GroupBy(r => r.Mode).ToDictionary(g => g.Key, g => g.Count());
+        var evaluation = RetrievalEvaluation.Of(results);
 
-        logger.LogInformation(
-            "Retrieval ({Intent}): {Grounded}/{Total} finding(s) grounded — exact {Exact}, "
-            + "hybrid {Hybrid}, semantic {Semantic}, none {None}; {Fallbacks} fell back to the "
-            + "weakness class",
-            intent, grounded, results.Count,
-            byMode.GetValueOrDefault(RetrievalMode.ExactFilter),
-            byMode.GetValueOrDefault(RetrievalMode.Hybrid),
-            byMode.GetValueOrDefault(RetrievalMode.Semantic),
-            byMode.GetValueOrDefault(RetrievalMode.None),
-            results.Count(r => r.FellBackToWeaknessClass));
+        // Warning when a finding went unanswered: the audit cannot support a claim about it, and
+        // that is a fact about the report's trustworthiness rather than routine progress.
+        if (evaluation.FullyGrounded)
+            logger.LogInformation("Retrieval ({Intent}): {Evaluation}", intent, evaluation.Report());
+        else
+            logger.LogWarning("Retrieval ({Intent}): {Evaluation}", intent, evaluation.Report());
     }
 }

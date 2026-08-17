@@ -53,6 +53,10 @@ public sealed class DebateEngine(
             ?? throw new InvalidOperationException(
                 $"Debate for scan '{brief.ScanJobId}' ended without an audit. "
                 + $"{result.Turns.Count} turn(s) completed; "
-                + $"{result.Checkpoints.Count} checkpoint(s) available for resume.");
+                + $"{result.Checkpoints.Count} checkpoint(s) available for resume."
+                + (result.Failures.Count > 0
+                    ? $" Failure(s) reported by the workflow: {string.Join(" | ", result.Failures)}"
+                    : " No failure event was reported by the workflow itself — check the model "
+                      + "provider's own connectivity/rate-limit status directly."));
     }
 }

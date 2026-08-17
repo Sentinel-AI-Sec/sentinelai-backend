@@ -1,4 +1,4 @@
-# Working on retrieval (SEC-22 / SEC-23)
+# Working on retrieval (SEC-22 → SEC-25)
 
 **Read this if** you have cloned the repo and want to run, change, or review the retrieval code.
 
@@ -30,9 +30,9 @@ Clone, build, test. Nothing else.
 dotnet test SentinelAI.slnx
 ```
 
-**Expect ~655 passed and 23 skipped, 0 failed.**
+**Expect 810 passed and 31 skipped.**
 
-The skips are **not** breakage. Seventeen of them need infrastructure you do not have yet, and
+The skips are **not** breakage. Twenty-five of them need infrastructure you do not have yet, and
 they say so:
 
 ```
@@ -44,9 +44,9 @@ The other six are `CommittedFixtureGranularityTests`, which need the `sentinelai
 repository checked out; they belong to a different story.
 
 **Everything that can be tested without infrastructure already is.** The decision tree, both
-mandatory filters, the CWE fallback, the embedder's failure modes and the offense/defense split
-are all covered by the 655 — because the logic lives in `Application` and the network lives behind
-two ports.
+mandatory filters, the CWE fallback, the embedder's failure modes, the offense/defense split,
+SEC-24's quality guard and SEC-25's coverage metric are all covered by the 810 — because the logic
+lives in `Application` and the network lives behind two ports.
 
 ---
 
@@ -81,8 +81,9 @@ Clean up with `docker rm -f qdrant-test`.
 
 ## 4. Level 2 — a real corpus · ~15 minutes + an ingest
 
-This turns on the nine tests that prove retrieval reaches Pipeline A's knowledge, and that a whole
-scan is grounded in it rather than in the walking skeleton's canned text.
+This turns on the seventeen tests that prove retrieval reaches Pipeline A's knowledge, that a whole
+scan is grounded in it rather than in the walking skeleton's canned text, and that grounding
+coverage on the fixture is what SEC-25 says it is.
 
 ### 4.1 Get a corpus
 
@@ -131,7 +132,7 @@ want a one-off.
 dotnet test tests/SentinelAI.Integration.Tests --filter "FullyQualifiedName~LiveCorpus"
 ```
 
-**Expect 9 passed.** These only ever read — unlike level 1, they create and delete nothing.
+**Expect 17 passed.** These only ever read — unlike level 1, they create and delete nothing.
 
 ---
 
@@ -160,11 +161,22 @@ Setup is in the sibling `sentinelai-knowledge` repository, at `service/README.md
 | `~KnowledgeRetrievalServiceTests` | 16 | nothing | The decision tree — every arm, against an in-memory corpus |
 | `~RetrievalContractTests` | 31 | nothing | The two mandatory filters are unrepresentable to omit |
 | `~RetrievalWiringTests` | 6 | nothing | Configuration decides real-corpus vs stub |
+| `~ChunkQualityTests` | 30 | nothing | SEC-24 — what the quality guard drops, keeps, and over-fetches |
+| `~LowQualityFilteringTests` | 7 | nothing | SEC-24 — the guard is on both arms and `k` results still come back |
+| `~RetrievalEvaluationTests` | 11 | nothing | SEC-25 — grounding coverage, per-mode fire rates, the arithmetic |
 | `Infrastructure.Tests.Knowledge` | 23 | nothing | The embedder adapter's failure modes |
 | `~QdrantKnowledgeSearchTests` | 8 | **Docker** | The adapter's filters against real Qdrant |
-| `~LiveCorpus` | 9 | **corpus** | Retrieval and a whole scan against Pipeline A's knowledge |
+| `~LiveCorpus` | 17 | **corpus** | Retrieval, a whole scan, SEC-24's guard and SEC-25's coverage against Pipeline A's knowledge |
 
-With Docker and a corpus, the full suite is **672 passed, 6 skipped**.
+With Docker and a corpus, the full suite is **835 passed, 6 skipped**, and the retrieval
+slice above is **152 passed, 0 failed**.
+
+> **One unrelated failure is currently expected.**
+> `IngressRedactionWiringTests.The_registered_debate_engine_is_the_redacting_one` asserts that
+> `IDebateEngine` resolves to exactly `RedactingDebateEngine`. SEC-50 now wraps that in
+> `EdgeIntegrityDebateEngine`, deliberately and by its own comment, so the assertion is stale
+> rather than the redaction being gone — the redacting engine is still in the chain. It fails
+> on `origin/dev` independently of anything on this page.
 
 ---
 
@@ -210,8 +222,10 @@ Two files carry the design; read them first and the rest follows.
 - **`SemanticQuery.cs`** — throws if given no filter. Unfiltered, 26,283 NVD chunks outrank 172
   OWASP ones for every query.
 
-Then `KnowledgeRetrievalService.cs` (the tree), `RetrievalIntent.cs` (the filter table), and
-`AgentRetrieval.cs` (SEC-23, one file).
+Then `KnowledgeRetrievalService.cs` (the tree), `RetrievalIntent.cs` (the filter table),
+`AgentRetrieval.cs` (SEC-23, one file), `ChunkQuality.cs` (SEC-24 — see
+[`Deprecated_Filtering.md`](Deprecated_Filtering.md)), and `RetrievalEvaluation.cs` (SEC-25 — see
+[`Retrieval_Evaluation.md`](Retrieval_Evaluation.md)).
 
 **Retrieval has no HTTP endpoint.** Nothing calls `ThinSlicePipeline` from a controller yet, so
 there is no request to send — SEC-46 is the story that wires scan-time orchestration. The evidence

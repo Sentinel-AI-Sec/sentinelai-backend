@@ -39,7 +39,7 @@ public sealed class ChainOutcomeWriter(IUnitOfWork unitOfWork, ILogger<ChainOutc
 
         if (top is null) return;
 
-        var status = StatusFor(audit.Outcome);
+        var status = StatusFor(audit);
         top.Status = status;
 
         await unitOfWork.Repository<Chain>().UpdateAsync(top);
@@ -56,12 +56,35 @@ public sealed class ChainOutcomeWriter(IUnitOfWork unitOfWork, ILogger<ChainOutc
     /// Red did run, but nothing confirmed or refuted what it asserted, and "unreadable" or
     /// "ran out of turns" is not evidence the chain is real or fake (AID-01 §3.3).
     /// </summary>
-    private static ChainStatus StatusFor(DebateOutcome outcome) => outcome switch
+    /// <remarks>
+    /// SEC-50: a <see cref="DebateOutcome.Converged"/> result never reaches
+    /// <see cref="ChainStatus.Validated"/> when <see cref="DraftAudit.EdgeIntegrityWarnings"/> is
+    /// non-empty — a hop in the chain the Reporter actually reported that does not match the
+    /// graph. Blue's own verdict said the chain holds; the mechanical check is what caught the
+    /// live case where Blue was wrong to say so — a reversed-direction edge it read as confirmed.
+    /// The chain still gets asserted, not rejected: a mismatched node pair is evidence the check
+    /// should not be trusted blindly, not proof the chain is fake either.
+    /// <para>
+    /// Deliberately not <see cref="DraftAudit.AbandonedReasoningWarnings"/> — a hop Red or Blue
+    /// considered and the Reporter itself dropped from the final chain is not evidence against
+    /// the chain that was actually reported. A live run had Red assert a fabricated path
+    /// alongside a genuinely valid one in the same turn; the Reporter reported only the valid
+    /// one, and that chain does not deserve to be capped for reasoning nobody acted on.
+    /// </para>
+    /// </remarks>
+    private static ChainStatus StatusFor(DraftAudit audit)
     {
-        DebateOutcome.Converged => ChainStatus.Validated,
-        DebateOutcome.ChainBroken => ChainStatus.Rejected,
-        DebateOutcome.TurnCapped => ChainStatus.Asserted,
-        DebateOutcome.VerdictUnreadable => ChainStatus.Asserted,
-        _ => ChainStatus.Asserted,
-    };
+        var outcome = audit.Outcome switch
+        {
+            DebateOutcome.Converged => ChainStatus.Validated,
+            DebateOutcome.ChainBroken => ChainStatus.Rejected,
+            DebateOutcome.TurnCapped => ChainStatus.Asserted,
+            DebateOutcome.VerdictUnreadable => ChainStatus.Asserted,
+            _ => ChainStatus.Asserted,
+        };
+
+        return outcome == ChainStatus.Validated && audit.EdgeIntegrityWarnings.Count > 0
+            ? ChainStatus.Asserted
+            : outcome;
+    }
 }

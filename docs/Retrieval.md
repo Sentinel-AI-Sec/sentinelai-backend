@@ -80,8 +80,10 @@ A silent fallback reads downstream as a direct hit on the specific CVE, which is
 audit cannot support. `RetrievalMiss` has three shapes: the CVE was not in the corpus, the
 finding had no clean identifier at all, or nothing came back and the finding is ungrounded.
 
-`RetrievalResult.Mode` records which arm answered, per finding. SEC-25 turns that into an
-asserted metric; the service already logs coverage and per-mode counts.
+`RetrievalResult.Mode` records which arm answered, per finding. SEC-25 turns that into an asserted
+metric — see [`Retrieval_Evaluation.md`](Retrieval_Evaluation.md) — and the service now logs
+*through* `RetrievalEvaluation`, so the number a test fails on and the number a log prints are the
+same number.
 
 ---
 
@@ -89,9 +91,13 @@ asserted metric; the service already logs coverage and per-mode counts.
 
 - **Which agent asks** — SEC-23. `RetrievalIntent` is keyed on the question, not the agent, so
   the Reporter can ask a defensive question without pretending to be Blue.
-- **Deprecated filtering** — SEC-24. `QdrantOptions.PrefetchMultiplier` already over-fetches 4×
-  per vector, which is the headroom that story needs to drop entries and still return `k`.
-- **Grounding coverage as an assertion** — SEC-25.
+- **Deprecated filtering** — SEC-24, now built; see [`Deprecated_Filtering.md`](Deprecated_Filtering.md).
+  An earlier draft of this page said `QdrantOptions.PrefetchMultiplier` was the headroom that story
+  needed. It is not: that multiplier widens the two *inputs* to fusion, and fusion still emits
+  exactly `limit`. SEC-24 raises the outer limit itself.
+- **Grounding coverage as an assertion** — SEC-25, now built; see
+  [`Retrieval_Evaluation.md`](Retrieval_Evaluation.md). SEC-22 records the per-finding mode and
+  the misses; measuring them is a separate job with a separate failure.
 - **Corpus-manifest parity** — SEC-48. `QdrantKnowledgeSearch.VerifyCompatibleAsync` does the
   cheap half (collection exists, dense width matches); comparing the embedder's pinned revision
   against the manifest needs Pipeline A to publish one.
