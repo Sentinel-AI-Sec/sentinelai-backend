@@ -164,7 +164,8 @@ public sealed class ScanPipelineRunnerTests : IDisposable
         SentinelDbContext Db,
         Guid JobId,
         RecordingLogger<ScanPipelineRunner> Log,
-        RecordingKnowledgeRetriever Corpus) : IDisposable
+        RecordingKnowledgeRetriever Corpus,
+        CapturingRetentionPolicy Retention) : IDisposable
     {
         public void Dispose() => Db.Dispose();
     }
@@ -252,6 +253,8 @@ public sealed class ScanPipelineRunnerTests : IDisposable
         var corpus = new RecordingKnowledgeRetriever(
             new SeedKnowledgeRetriever(NullLogger<SeedKnowledgeRetriever>.Instance));
 
+        var retention = new CapturingRetentionPolicy();
+
         var thinSlice = new ThinSlicePipeline(
             new GraphSeeder(),
             new RetrievalQueryBuilder(),
@@ -261,7 +264,7 @@ public sealed class ScanPipelineRunnerTests : IDisposable
                 new ChatClientFactory(new ModelProviderOptions { Provider = ModelProvider.Scripted }),
                 Options.Create(new DebateOptions { MaxRounds = 2 })),
             new ReportBuilder(),
-            new FakeScanRetentionPolicy(),
+            retention,
             NullLogger<ThinSlicePipeline>.Instance);
 
         var log = new RecordingLogger<ScanPipelineRunner>();
@@ -279,7 +282,7 @@ public sealed class ScanPipelineRunnerTests : IDisposable
             new ChainOutcomeWriter(unitOfWork, NullLogger<ChainOutcomeWriter>.Instance),
             log);
 
-        return new Harness(runner, db, jobId, log, corpus);
+        return new Harness(runner, db, jobId, log, corpus, retention);
     }
 
     // ---- AC 1: a bundle runs the whole flow and produces a draft audit -----------------------
@@ -309,6 +312,18 @@ public sealed class ScanPipelineRunnerTests : IDisposable
         Assert.Equal(ScanStage.Report, job.Stage);
         Assert.NotNull(job.CompletedAt);
         Assert.Null(job.FailureReason);
+
+        // The criterion is "produces a draft audit", not "did not crash". This is the artifact
+        // itself, caught at the point the pipeline hands it to retention.
+        var report = h.Retention.Report;
+
+        Assert.NotNull(report);
+        Assert.Equal(ReportBuilder.DraftAudit, report.Framing);
+        Assert.Equal(h.JobId, report.ScanJobId);
+        Assert.NotEmpty(report.Summary);
+
+        // Framed as a draft for a human, never as a verdict - the rule SEC-28 exists to hold.
+        Assert.Contains("not a verified verdict", report.Summary, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -459,6 +474,28 @@ public sealed class ScanPipelineRunnerTests : IDisposable
             => inner.SaveAsync(scanJobId, bundle, ct);
 
         public Task PurgeAsync(Guid scanJobId, CancellationToken ct) => inner.PurgeAsync(scanJobId, ct);
+    }
+
+    /// <summary>
+    /// Keeps the report the pipeline handed to retention.
+    /// </summary>
+    /// <remarks>
+    /// The runner does not return the report — retention is its last stage and decides whether it
+    /// is kept at all — so this is the one place the draft audit is observable from outside the
+    /// pipeline without also opting into persistence and the bundle purge that comes with it.
+    /// </remarks>
+    private sealed class CapturingRetentionPolicy : IScanRetentionPolicy
+    {
+        public Report? Report { get; private set; }
+
+        public Task<RetentionOutcome> ApplyAfterAuditAsync(
+            Guid tenantId, Guid scanJobId, Report report, CancellationToken ct = default)
+        {
+            Report = report;
+            report.Retained = false;
+
+            return Task.FromResult(new RetentionOutcome(BundlePurged: true, ReportRetained: false));
+        }
     }
 
     /// <summary>Counts what the pipeline asked the corpus to do.</summary>
