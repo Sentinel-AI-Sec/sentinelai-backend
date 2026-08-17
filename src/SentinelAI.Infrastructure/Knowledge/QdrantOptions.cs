@@ -26,11 +26,19 @@ public sealed class QdrantOptions
     /// How many chunks to over-fetch per vector before fusion.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The reference implementation prefetches <c>top_k * 4</c> from each of dense and sparse
     /// before Reciprocal Rank Fusion picks the final <c>top_k</c>. Fusing two lists of exactly
     /// <c>k</c> gives RRF almost nothing to reorder; the multiplier is what makes fusion do work.
-    /// It is also the headroom SEC-24's over-fetch-and-filter needs to drop deprecated entries
-    /// and still return <c>k</c>.
+    /// </para>
+    /// <para>
+    /// <b>It is not the headroom SEC-24 needs, despite the shape.</b> This widens the two
+    /// <em>inputs</em> to fusion, and fusion still emits exactly <c>limit</c> points — so after it
+    /// runs there are <c>k</c>, and dropping any leaves fewer than <c>k</c>. The dense-only path
+    /// settles the question: it has no prefetch at all and asks for <c>limit</c> directly. SEC-24
+    /// therefore raises the outer limit itself, via <c>ChunkQuality.OverFetch</c>, and the two
+    /// multiply — at the defaults, 10 wanted → 20 requested → 80 prefetched per vector.
+    /// </para>
     /// </remarks>
     public int PrefetchMultiplier { get; set; } = 4;
 

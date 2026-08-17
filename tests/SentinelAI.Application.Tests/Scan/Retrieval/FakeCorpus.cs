@@ -15,7 +15,8 @@ internal sealed record CorpusPoint(
     string Text,
     string? CveId = null,
     string? CweId = null,
-    string? TechniqueId = null);
+    string? TechniqueId = null,
+    string? Status = null);
 
 /// <summary>
 /// An in-memory stand-in for the Qdrant corpus that reproduces the two behaviours SEC-22 exists
@@ -39,9 +40,27 @@ internal sealed record CorpusPoint(
 /// ranking is.
 /// </para>
 /// </remarks>
+/// <para>
+/// <b>3. It is clean unless a test asks for a stale one.</b> Pipeline A drops deprecated and
+/// empty entries at ingest and the live corpus has none of either, so the default here has none
+/// either — a fake that shipped rot by default would let SEC-24's guard mask a different bug.
+/// <c>withLowQuality: true</c> is the stale corpus that story exists for.
+/// </para>
 internal sealed class FakeCorpus : IKnowledgeSearch
 {
     public const string CorpusVersion = "2026-08-10-1143";
+
+    /// <summary>
+    /// The wording the SEC-24 points are written to match, so a test controls what ranks.
+    /// </summary>
+    /// <remarks>
+    /// Scoring is token overlap, so "scores spuriously high" is reproduced literally: the
+    /// deprecated points below contain every one of these words and the live ones contain five,
+    /// which puts all the rot above all the knowledge. That is the ordering an over-fetch has to
+    /// survive.
+    /// </remarks>
+    public const string DeserializationQuery =
+        "Unsafe deserialization of untrusted data allows remote code execution";
 
     /// <summary>Every exact lookup this corpus was asked, so a test can assert the filter shape.</summary>
     public List<ExactLookup> ExactLookups { get; } = [];
@@ -49,7 +68,10 @@ internal sealed class FakeCorpus : IKnowledgeSearch
     /// <summary>Every semantic query, paired with the vectors it was given.</summary>
     public List<(SemanticQuery Query, QueryVectors Vectors)> Searches { get; } = [];
 
-    private readonly List<CorpusPoint> _points = [.. Build()];
+    private readonly List<CorpusPoint> _points;
+
+    public FakeCorpus(bool withLowQuality = false) =>
+        _points = [.. Build(), .. withLowQuality ? LowQuality() : []];
 
     public Task<IReadOnlyList<KnowledgeChunk>> ExactAsync(ExactLookup lookup, CancellationToken ct = default)
     {
@@ -121,7 +143,7 @@ internal sealed class FakeCorpus : IKnowledgeSearch
 
     private static KnowledgeChunk ToChunk(CorpusPoint p, float score) => new(
         p.ChunkId, p.Source, p.Title, p.Text, score, CorpusVersion,
-        p.CveId, p.CweId, CapecIds: null, p.TechniqueId);
+        p.CveId, p.CweId, CapecIds: null, p.TechniqueId, p.Status);
 
     private static float Overlap(HashSet<string> terms, CorpusPoint point)
     {
@@ -222,6 +244,82 @@ internal sealed class FakeCorpus : IKnowledgeSearch
             "A08:2021 Software and Data Integrity Failures",
             "Do not deserialize untrusted input. Remediate by using integrity checks such as "
             + "digital signatures on serialized objects.");
+    }
+
+    /// <summary>
+    /// The corpus SEC-24 exists for: retired and empty entries that outrank the live ones.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only reachable through <c>withLowQuality: true</c>. Between them these reproduce all three
+    /// signals the guard reads, because each source marks retirement differently and a fake that
+    /// used one signal would let the other two rot silently:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// <b>Five CAPEC points with <c>status: Deprecated</c></b> — the source metadata flag. CAPEC
+    /// and CWE carry <c>status</c> in the payload.
+    /// </description></item>
+    /// <item><description>
+    /// <b>Three ATT&amp;CK points titled <c>DEPRECATED: …</c> and carrying no status at all</b> —
+    /// which is exactly how the live corpus looks, because the ATT&amp;CK loader reads
+    /// <c>revoked</c>/<c>x_mitre_deprecated</c> and does not write them to the payload. If the
+    /// guard only checked <c>status</c>, these three would survive and nothing would say so.
+    /// </description></item>
+    /// <item><description>
+    /// <b>One chunk below the ingest's 40-character minimum</b> — the thin-text half of the story.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// Nine rejects against twelve live fillers, all matching the same query and all ranked above
+    /// them. A request for ten with no over-fetch returns nine rejects and one usable chunk.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<CorpusPoint> LowQuality()
+    {
+        // Every query word, so these take the top of the ranking.
+        const string EveryWord =
+            "Unsafe deserialization of untrusted data allows remote code execution in the "
+            + "affected component.";
+
+        // Five of the eight, so these rank below the rot but stay well inside an over-fetch.
+        const string SomeWords =
+            "Deserialization of untrusted data in a serialized object stream, and how an adversary "
+            + "reaches code paths through it.";
+
+        for (var i = 1; i <= 5; i++)
+        {
+            yield return new CorpusPoint(
+                $"capec-capec-90{i}", KnowledgeSource.Capec, KnowledgeContentType.Description, OffenseOnly,
+                $"CAPEC-90{i}: Retired Pattern {i}", EveryWord, Status: "Deprecated");
+        }
+
+        for (var i = 1; i <= 3; i++)
+        {
+            yield return new CorpusPoint(
+                $"attack-t900{i}", KnowledgeSource.Attack, KnowledgeContentType.Description, OffenseOnly,
+                $"DEPRECATED: Withdrawn Technique {i}", EveryWord, TechniqueId: $"T900{i}");
+        }
+
+        // A full title over an empty body — the shape a withdrawn entry actually has, and the
+        // reason the guard measures Text rather than the whole chunk. Its title carries every
+        // query word, so it ranks with the rest of the rot instead of sinking out of reach.
+        yield return new CorpusPoint(
+            "capec-capec-910", KnowledgeSource.Capec, KnowledgeContentType.Description, OffenseOnly,
+            "CAPEC-910: Unsafe deserialization of untrusted data allows remote code execution",
+            "Withdrawn; see the replacement.", Status: "Draft");
+
+        for (var i = 1; i <= 12; i++)
+        {
+            yield return new CorpusPoint(
+                $"capec-capec-8{i:00}", KnowledgeSource.Capec, KnowledgeContentType.Description, OffenseOnly,
+                $"CAPEC-8{i:00}: Live Pattern {i}", SomeWords,
+
+                // Draft, Stable, Incomplete and Usable are all live. The corpus is mostly Draft —
+                // 723 CAPEC and 432 CWE chunks in offense — so a guard that kept only Stable
+                // would empty the catalogue, and these fillers are what would disappear.
+                Status: (i % 4) switch { 0 => "Draft", 1 => "Stable", 2 => "Incomplete", _ => "Usable" });
+        }
     }
 }
 

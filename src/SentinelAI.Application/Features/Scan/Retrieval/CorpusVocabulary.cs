@@ -159,6 +159,18 @@ public static class CorpusFields
     public const string Text = "text";
     public const string CorpusVersion = "corpus_version";
 
+    /// <summary>
+    /// The source's lifecycle value. Read, never filtered on — it is <b>not</b> in
+    /// <see cref="Indexed"/>.
+    /// </summary>
+    /// <remarks>
+    /// Measured against the live corpus: <c>points/count</c> filtered on <c>status</c> returns
+    /// HTTP 400 for every value on both collections. Present on CWE and CAPEC chunks only;
+    /// ATT&amp;CK, NVD and OWASP points have no such key. SEC-24 reads it off the payload and
+    /// filters client-side because the server will not do it.
+    /// </remarks>
+    public const string Status = "status";
+
     /// <summary>Every field a filter may key on, for the guard that rejects the rest.</summary>
     public static readonly IReadOnlySet<string> Indexed = new HashSet<string>(StringComparer.Ordinal)
     {

@@ -34,6 +34,10 @@ public enum RetrievalMode
 /// <param name="CweId">Present on CWE chunks and on CVEs tagged with a weakness.</param>
 /// <param name="CapecIds">From a CWE's <c>Related_Attack_Patterns</c>. <b>Unordered</b> — see remarks.</param>
 /// <param name="TechniqueId">Present on ATT&amp;CK chunks.</param>
+/// <param name="Status">
+/// The source's own lifecycle value — <c>Draft</c>, <c>Stable</c>, <c>Incomplete</c>,
+/// <c>Usable</c>. Null on ATT&amp;CK, NVD and OWASP chunks, which carry no such field.
+/// </param>
 /// <remarks>
 /// <para>
 /// <see cref="Score"/> is zero for <see cref="RetrievalMode.ExactFilter"/> because a payload
@@ -46,6 +50,12 @@ public enum RetrievalMode
 /// is CAPEC-19 "Embedding Scripts within Scripts", a weak fit for an IAM misconfiguration
 /// (<c>PIPELINE_A_CONTEXT.md</c> §7). Anything that picks one must rank them deliberately.
 /// </para>
+/// <para>
+/// <b><see cref="Status"/> is read but never filtered on server-side.</b> It is a payload field
+/// and not an indexed one, and the cluster answers a filter on it with HTTP 400 rather than a
+/// slow scan. That is why SEC-24 is an over-fetch-and-filter over results instead of another
+/// condition on the query — see <see cref="ChunkQuality"/>.
+/// </para>
 /// </remarks>
 public sealed record KnowledgeChunk(
     string ChunkId,
@@ -57,7 +67,8 @@ public sealed record KnowledgeChunk(
     string? CveId = null,
     string? CweId = null,
     IReadOnlyList<string>? CapecIds = null,
-    string? TechniqueId = null);
+    string? TechniqueId = null,
+    string? Status = null);
 
 /// <summary>
 /// Why a finding was not grounded as specifically as it could have been.
@@ -100,6 +111,26 @@ public sealed record RetrievalMiss(string Identifier, string Reason)
     /// <summary>Nothing at all came back. The finding is ungrounded.</summary>
     public static RetrievalMiss Ungrounded(string nodeRef) => new(
         nodeRef, "retrieved no knowledge; any assertion about it would be unsupported");
+
+    /// <summary>
+    /// Chunks came back and SEC-24 rejected every one of them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately not folded into <see cref="Ungrounded"/>, which says the corpus was asked and
+    /// had nothing. This says the corpus had something and it was retired or empty — a stale
+    /// corpus, fixed by re-running Pipeline A, versus a genuine knowledge gap, which no re-ingest
+    /// closes. The two look identical from a coverage number and have nothing in common.
+    /// </para>
+    /// <para>
+    /// It should never appear against a corpus Pipeline A built: its loaders drop these entries
+    /// before they are ever embedded. Seeing it is the signal that they did not.
+    /// </para>
+    /// </remarks>
+    public static RetrievalMiss NothingUsable(string identifier, int dropped) => new(
+        identifier,
+        $"matched {dropped} chunk(s), all deprecated or below the corpus's minimum useful length, "
+        + "so none was used as grounding");
 }
 
 /// <summary>
