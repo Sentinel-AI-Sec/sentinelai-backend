@@ -82,6 +82,13 @@ public static class DependencyInjection
         // when someone remembers to call the purge endpoint.
         services.AddScoped<Abstractions.IScanRetentionPolicy, Features.Scan.Retention.ScanRetentionPolicy>();
 
+        // SEC-46: the stages above, in order, driven by the worker rather than by hand. Scoped
+        // like everything it composes, and resolved once per claimed job — the worker gives each
+        // run a scope of its own so the tenant it assumes cannot outlive the job it was claimed
+        // for. Registered here rather than in Infrastructure because it is an Application service
+        // that happens to have a background caller; the worker depends on this, not the reverse.
+        services.AddScoped<Features.Scan.Orchestration.ScanPipelineRunner>();
+
         return services;
     }
 }
