@@ -68,6 +68,20 @@ public sealed record DebateResponse
     public required IReadOnlyList<TurnView> Transcript { get; init; }
     public required string Disclaimer { get; init; }
 
+    /// <summary>
+    /// SEC-50: hops or node labels in the Reporter's own reported chain that do not match a real
+    /// edge in the resource graph. Non-empty means the reported chain itself is suspect — checked
+    /// mechanically against the graph, not against another model's reading of it. Empty on a clean
+    /// debate.
+    /// </summary>
+    public required IReadOnlyList<string> EdgeIntegrityWarnings { get; init; }
+
+    /// <summary>
+    /// SEC-50: the same mechanical check, but for hops that appeared only in Red's or Blue's raw
+    /// reasoning and were not part of the chain the Reporter actually reported.
+    /// </summary>
+    public required IReadOnlyList<string> AbandonedReasoningWarnings { get; init; }
+
     /// <summary>What the audit cost, split by model tier (SEC-31).</summary>
     public required CostView Cost { get; init; }
 
@@ -83,6 +97,8 @@ public sealed record DebateResponse
             Summary = audit.Summary,
             Transcript = [.. audit.Transcript.Select(TurnView.From)],
             Disclaimer = audit.Disclaimer,
+            EdgeIntegrityWarnings = audit.EdgeIntegrityWarnings,
+            AbandonedReasoningWarnings = audit.AbandonedReasoningWarnings,
             Cost = CostView.From(audit.Cost),
         };
 

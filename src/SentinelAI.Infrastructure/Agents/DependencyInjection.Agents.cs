@@ -64,10 +64,16 @@ public static class AgentsDependencyInjection
         services.TryAddSingleton<ISecretScanner, RegexSecretScanner>();
 
         services.AddSingleton<DebateEngine>();
-        services.AddSingleton<IDebateEngine>(sp => new RedactingDebateEngine(
-            sp.GetRequiredService<DebateEngine>(),
-            sp.GetRequiredService<ISecretScanner>(),
-            sp.GetRequiredService<ILogger<RedactingDebateEngine>>()));
+        // SEC-50: the mechanical edge check wraps the redacting engine, not the other way
+        // around — it inspects what came back from a debate that already ran, so its position
+        // relative to the outbound-redaction concern doesn't matter, but IDebateEngine should
+        // always resolve to the fully-decorated engine.
+        services.AddSingleton<IDebateEngine>(sp => new EdgeIntegrityDebateEngine(
+            new RedactingDebateEngine(
+                sp.GetRequiredService<DebateEngine>(),
+                sp.GetRequiredService<ISecretScanner>(),
+                sp.GetRequiredService<ILogger<RedactingDebateEngine>>()),
+            sp.GetRequiredService<ILogger<EdgeIntegrityDebateEngine>>()));
 
         return services;
     }

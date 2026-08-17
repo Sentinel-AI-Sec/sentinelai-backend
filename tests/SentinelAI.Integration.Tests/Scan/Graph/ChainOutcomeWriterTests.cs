@@ -31,7 +31,10 @@ public class ChainOutcomeWriterTests
     };
 
     private static DraftAudit Audit(
-        bool verdictReadable = true, bool terminatedByTurnCap = false, bool converged = false) => new()
+        bool verdictReadable = true,
+        bool terminatedByTurnCap = false,
+        bool converged = false,
+        IReadOnlyList<string>? edgeIntegrityWarnings = null) => new()
     {
         Summary = "test",
         Transcript = [],
@@ -39,6 +42,7 @@ public class ChainOutcomeWriterTests
         TerminatedByTurnCap = terminatedByTurnCap,
         Converged = converged,
         VerdictReadable = verdictReadable,
+        EdgeIntegrityWarnings = edgeIntegrityWarnings ?? [],
     };
 
     [Fact]
@@ -52,6 +56,39 @@ public class ChainOutcomeWriterTests
 
         Assert.Equal(ChainStatus.Validated, chain.Status);
         Assert.True(unitOfWork.CompleteCallCount > 0);
+    }
+
+    /// <summary>
+    /// SEC-50: a converged debate whose mechanical edge check found a hop that doesn't match the
+    /// graph is capped at Asserted, never Validated. Blue's own verdict said the chain holds; the
+    /// mechanical check is what caught the one live case where that verdict was wrong.
+    /// </summary>
+    [Fact]
+    public async Task A_converged_debate_with_edge_integrity_warnings_is_capped_at_asserted()
+    {
+        var unitOfWork = new FakeUnitOfWork(new FakeScanJobRepository());
+        var chain = Chain(priority: 1);
+        unitOfWork.FakeRepository<Chain>().Added.Add(chain);
+
+        var audit = Audit(converged: true, edgeIntegrityWarnings: ["N3 -> N69 does not match the graph"]);
+        await Writer(unitOfWork).ApplyAsync(Job, audit, CancellationToken.None);
+
+        Assert.Equal(ChainStatus.Asserted, chain.Status);
+    }
+
+    /// <summary>A broken chain stays rejected regardless of what the edge check found — it is
+    /// already the worst outcome, and a mechanical warning cannot make a discarded chain worse.</summary>
+    [Fact]
+    public async Task A_broken_chain_with_edge_integrity_warnings_stays_rejected()
+    {
+        var unitOfWork = new FakeUnitOfWork(new FakeScanJobRepository());
+        var chain = Chain(priority: 1);
+        unitOfWork.FakeRepository<Chain>().Added.Add(chain);
+
+        var audit = Audit(converged: false, edgeIntegrityWarnings: ["N1 -> N9 not found"]);
+        await Writer(unitOfWork).ApplyAsync(Job, audit, CancellationToken.None);
+
+        Assert.Equal(ChainStatus.Rejected, chain.Status);
     }
 
     [Fact]

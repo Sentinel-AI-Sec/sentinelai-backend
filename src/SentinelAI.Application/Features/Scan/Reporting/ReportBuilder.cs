@@ -41,7 +41,9 @@ public sealed class ReportBuilder
             ScanJobId = scanJobId,
             Framing = DraftAudit,
             // The disclaimer is part of the text, not a field a renderer may forget to show.
-            Summary = $"{audit.Summary}{Environment.NewLine}{Environment.NewLine}{audit.Disclaimer}",
+            // SEC-50: mechanical edge-check warnings travel the same way, for the same reason —
+            // a reader of the summary alone must see them without a separate field to remember.
+            Summary = $"{audit.Summary}{EdgeWarningBlock(audit)}{Environment.NewLine}{Environment.NewLine}{audit.Disclaimer}",
             Retained = false,
             CreatedAt = createdAtUtc,
         };
@@ -62,6 +64,44 @@ public sealed class ReportBuilder
         }
 
         return report;
+    }
+
+    /// <summary>
+    /// Renders the mechanical edge check's findings (SEC-50) as clearly labelled blocks, or
+    /// nothing at all on a clean transcript — absence must not read as "checked and clean" versus
+    /// "never checked," but every other stage in this pipeline that has nothing to report also
+    /// says nothing, and a block that always prints "0 warnings" trains a reader to skip it.
+    /// </summary>
+    /// <remarks>
+    /// Two separate blocks, not one: <see cref="DraftAudit.EdgeIntegrityWarnings"/> is about the
+    /// chain this report actually asserts — a reader deciding whether to trust it needs that
+    /// first and unambiguously. <see cref="DraftAudit.AbandonedReasoningWarnings"/> is reasoning
+    /// Red or Blue produced that never made it into the reported chain — worth showing a reader
+    /// who wants the full transcript's context, but not something that should read as a defect in
+    /// the chain being reported, because it isn't one.
+    /// </remarks>
+    private static string EdgeWarningBlock(DraftAudit audit)
+    {
+        var nl = Environment.NewLine;
+        var block = string.Empty;
+
+        if (audit.EdgeIntegrityWarnings.Count > 0)
+        {
+            block += nl + nl
+                + $"MECHANICAL EDGE CHECK — {audit.EdgeIntegrityWarnings.Count} hop(s) in the "
+                + "reported chain do not match the resource graph's real edges:" + nl
+                + string.Join(nl, audit.EdgeIntegrityWarnings.Select(w => "  - " + w));
+        }
+
+        if (audit.AbandonedReasoningWarnings.Count > 0)
+        {
+            block += nl + nl
+                + $"NOTE — {audit.AbandonedReasoningWarnings.Count} issue(s) appeared in the "
+                + "debate's reasoning but were not part of the chain reported above:" + nl
+                + string.Join(nl, audit.AbandonedReasoningWarnings.Select(w => "  - " + w));
+        }
+
+        return block;
     }
 
     /// <summary>

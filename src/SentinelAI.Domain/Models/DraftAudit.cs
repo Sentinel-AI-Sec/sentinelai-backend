@@ -31,6 +31,30 @@ public sealed record DraftAudit
     public Confidence WeakestJoin { get; init; } = Confidence.Certain;
 
     /// <summary>
+    /// What the mechanical check (SEC-50) found <em>in the chain the Reporter actually reported</em>
+    /// — a hop naming two nodes with no real edge between them (in either direction), or a node
+    /// annotated with an identity the resource graph never declared. Checked against the graph
+    /// itself, never against what an LLM's own reading of the same text concluded. Non-empty here
+    /// means the reported chain itself is suspect, which is why <c>ChainOutcomeWriter</c> reads
+    /// this field specifically. Empty on a clean debate.
+    /// </summary>
+    public IReadOnlyList<string> EdgeIntegrityWarnings { get; init; } = [];
+
+    /// <summary>
+    /// The same two checks (SEC-50), but for hops that appeared only in Red's or Blue's raw
+    /// reasoning and were not part of what the Reporter actually reported — a candidate path
+    /// considered and dropped, not the chain a reader is being asked to trust.
+    /// </summary>
+    /// <remarks>
+    /// A live run had Red assert two candidate paths in one turn; the Reporter kept the clean one
+    /// and silently discarded the other, which contained a fabricated edge. Folding that into
+    /// <see cref="EdgeIntegrityWarnings"/> would have capped a genuinely valid, fully-grounded
+    /// chain at <c>Asserted</c> for reasoning nobody acted on. Kept here instead: visible to a
+    /// human reading the full transcript, without penalizing a clean final answer.
+    /// </remarks>
+    public IReadOnlyList<string> AbandonedReasoningWarnings { get; init; } = [];
+
+    /// <summary>
     /// What this audit cost, split by model tier (SEC-31). Defaults to
     /// <see cref="AuditCost.None"/> — nothing measured — rather than to zero spend.
     /// </summary>
