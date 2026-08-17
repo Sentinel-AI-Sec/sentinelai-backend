@@ -12,6 +12,7 @@ using SentinelAI.Infrastructure.Knowledge;
 using SentinelAI.Infrastructure.Implementation;
 using SentinelAI.Infrastructure.Implementation.Repositories;
 using SentinelAI.Infrastructure.Normalization;
+using SentinelAI.Infrastructure.Orchestration;
 using SentinelAI.Infrastructure.Security;
 
 namespace SentinelAI.Infrastructure;
@@ -30,7 +31,13 @@ public static class DependencyInjection
         services.Configure<BundleStorageOptions>(configuration.GetSection(BundleStorageOptions.SectionName));
         services.Configure<CorpusOptions>(configuration.GetSection(CorpusOptions.SectionName));
 
-        services.AddScoped<ICallerContext, HttpCallerContext>();
+        // SEC-46: registered by its concrete type as well, because the scan worker has to call
+        // Assume() on the very instance the scope's DbContext will read its tenant from. Every
+        // consumer other than the worker still takes ICallerContext and still gets the request's
+        // own claims — AssumableCallerContext delegates to HttpCallerContext whenever there is a
+        // request, and refuses to assume anything when there is one.
+        services.AddScoped<AssumableCallerContext>();
+        services.AddScoped<ICallerContext>(sp => sp.GetRequiredService<AssumableCallerContext>());
         services.AddScoped<ICorpusVersionProvider, ConfiguredCorpusVersionProvider>();
         services.AddScoped<IBundleInspector, TarGzBundleInspector>();
         services.AddScoped<IBundleStore, FileSystemBundleStore>();
@@ -132,6 +139,16 @@ public static class DependencyInjection
         // Infrastructure, not Application: the delete order it enforces is a property of the
         // relational schema's Restrict foreign keys, which nothing above this layer knows about.
         services.AddScoped<ITenantPurge, TenantPurgeService>();
+
+        // ---- SEC-46: scan-time orchestration (Pipeline B) --------------------------------
+        // The claim is raw SQL Server (UPDATE ... OUTPUT) because handing one queued row to
+        // exactly one worker is a property of the statement, not of the calling code. The
+        // worker is always registered and decides at runtime whether to run, so the test host
+        // and a scaled-out API instance can switch it off through configuration rather than by
+        // rebuilding the container.
+        services.Configure<ScanWorkerOptions>(configuration.GetSection(ScanWorkerOptions.SectionName));
+        services.AddScoped<IScanJobClaim, SqlScanJobClaim>();
+        services.AddHostedService<ScanPipelineWorker>();
 
         services.AddScoped<IScanJobRepository, ScanJobRepository>();
         services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));

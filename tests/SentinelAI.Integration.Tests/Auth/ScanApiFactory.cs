@@ -57,6 +57,15 @@ public sealed class ScanApiFactory : WebApplicationFactory<Program>
                 // channel to a Qdrant nobody started.
                 ["Knowledge:Endpoint"] = "",
                 ["Knowledge:ApiKey"] = "",
+
+                // SEC-46's worker, off for the same class of reason as the two above — except
+                // that here the damage is to the tests themselves rather than to a bill. Several
+                // suites seed a scan job in Queued and then drive it by hand through
+                // POST /v1/scans/{id}/graph; a worker running in the background would claim
+                // those rows out from under them, at a moment that varies with machine load.
+                // The claim is also raw SQL Server, which the in-memory provider below cannot
+                // execute at all.
+                ["Scanning:Worker:Enabled"] = "false",
             });
         });
 
