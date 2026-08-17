@@ -1,8 +1,13 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using SentinelAI.Application.Features.Scan.Orchestration;
+using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
+using SentinelAI.Domain.Enums;
+using SentinelAI.Domain.Models;
 using SentinelAI.Infrastructure.Implementation.Repositories;
 
 namespace SentinelAI.Infrastructure.Orchestration;
@@ -93,12 +98,125 @@ public sealed class ScanPipelineWorker(
             logger.LogInformation(
                 "Claimed scan job {ScanJobId} for tenant {TenantId}", claimed.ScanJobId, claimed.TenantId);
 
-            // TODO(SEC-46 checkpoint b): dispatch to ScanPipelineRunner in a scope that has
-            // assumed claimed.TenantId. Until that lands, Scanning:Worker:Enabled ships false so
-            // this loop cannot strand a claimed job in Running.
+            await RunAsync(claimed, stoppingToken);
+
+            // Deliberately no delay here. The poll interval is the cost of asking an empty queue
+            // again; a claim that succeeded is evidence there may be more, so a backlog drains at
+            // the speed of the pipeline rather than one job per interval.
         }
 
         logger.LogInformation("Scan pipeline worker stopping");
+    }
+
+    /// <summary>
+    /// Runs one claimed job to completion, in a scope that has assumed its tenant.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Assume comes first, before anything else is resolved.</b> <c>SentinelDbContext</c> reads
+    /// the tenant in its constructor, so a context built before the assumption would carry
+    /// <c>Guid.Empty</c> for the rest of the scope and quietly return no rows. Resolving the
+    /// runner first would construct one through its dependency chain, which is why these two
+    /// lines are in this order and not the other.
+    /// </para>
+    /// <para>
+    /// <b>The runner reports failure rather than throwing it</b> — a failed scan is an outcome,
+    /// not an exception. So anything caught here is the runner itself breaking, and the job it
+    /// was given is still <c>Running</c> with nothing left to advance it. The claim matches only
+    /// <c>Queued</c> rows, so nothing will ever pick it up again; recording the failure is what
+    /// keeps a bug from turning into a permanently invisible job.
+    /// </para>
+    /// </remarks>
+    private async Task RunAsync(ClaimedScanJob claimed, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+
+            scope.ServiceProvider.GetRequiredService<AssumableCallerContext>().Assume(claimed.TenantId);
+
+            var runner = scope.ServiceProvider.GetRequiredService<ScanPipelineRunner>();
+            var outcome = await runner.RunAsync(claimed.ScanJobId, claimed.TenantId, ct);
+
+            if (outcome.Succeeded)
+            {
+                logger.LogInformation(
+                    "Scan job {ScanJobId} completed: {Findings} finding(s), {Chains} candidate chain(s)",
+                    outcome.ScanJobId, outcome.Findings, outcome.CandidateChains);
+            }
+            else
+            {
+                // Warning and not Error: the pipeline did its job by attributing and recording
+                // this. The runner has already logged the exception itself at Error with a stack.
+                logger.LogWarning(
+                    "Scan job {ScanJobId} failed at stage {Stage}: {Reason}",
+                    outcome.ScanJobId, outcome.FailedStage, outcome.FailureReason);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex, "The pipeline runner threw for scan job {ScanJobId}; marking it failed so it "
+                + "is not left Running with nothing to advance it", claimed.ScanJobId);
+
+            await MarkStrandedAsync(claimed, ex);
+        }
+    }
+
+    /// <summary>
+    /// Last resort: writes <c>Failed</c> onto a job whose run died outside the runner's own
+    /// error handling.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A scope of its own, because the one that just threw may hold a <c>DbContext</c> with a
+    /// failed transaction or a broken connection — the most likely reason to be here at all.
+    /// </para>
+    /// <para>
+    /// <c>CancellationToken.None</c>, because the common path into this method is the host
+    /// stopping mid-run, and passing the token that just cancelled would cancel the write meant
+    /// to clean up after it. The work is one small update and cannot meaningfully delay shutdown.
+    /// A job interrupted by a shutdown genuinely did not finish, and <c>Failed</c> is visible and
+    /// resubmittable where <c>Running</c> is neither.
+    /// </para>
+    /// </remarks>
+    private async Task MarkStrandedAsync(ClaimedScanJob claimed, Exception failure)
+    {
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+
+            scope.ServiceProvider.GetRequiredService<AssumableCallerContext>().Assume(claimed.TenantId);
+
+            var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+            var job = await unitOfWork.Repository<ScanJob>()
+                .GetTableAsTracked()
+                .FirstOrDefaultAsync(j => j.Id == claimed.ScanJobId, CancellationToken.None);
+
+            if (job is null)
+            {
+                logger.LogError(
+                    "Could not re-read scan job {ScanJobId} to mark it failed; it remains Running",
+                    claimed.ScanJobId);
+
+                return;
+            }
+
+            job.Status = ScanStatus.Failed;
+            job.CompletedAt = DateTime.UtcNow;
+            job.FailureReason = $"the scan worker did not finish this job: {failure.Message}";
+
+            await unitOfWork.CompleteAsync();
+        }
+        catch (Exception ex)
+        {
+            // Nothing further to try. Logged loudly because the job is now stuck in Running and
+            // only an operator can tell it apart from one that is legitimately still going.
+            logger.LogError(
+                ex, "Could not mark scan job {ScanJobId} as failed; it is stranded in Running",
+                claimed.ScanJobId);
+        }
     }
 
     /// <summary>
