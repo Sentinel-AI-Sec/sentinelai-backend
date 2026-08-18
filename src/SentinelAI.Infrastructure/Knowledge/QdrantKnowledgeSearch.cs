@@ -206,11 +206,23 @@ public sealed class QdrantKnowledgeSearch : IKnowledgeSearch, IDisposable
     /// Reads a Qdrant payload into the Application's chunk shape.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Field names come from <see cref="CorpusFields"/> rather than string literals: they are
     /// written by a different repository in a different language, and a typo here produces a
     /// chunk with a null citation key rather than an error.
+    /// </para>
+    /// <para>
+    /// <b>Internal rather than private so SEC-24's one untestable link becomes testable.</b>
+    /// <c>ChunkQuality</c>'s deprecation check is pure and covered, but it can only see what this
+    /// method decided to read: if <c>status</c> stops arriving — renamed upstream, or delivered as
+    /// a non-string <see cref="Value"/> — every chunk gets a null <c>Status</c>, the
+    /// <c>DeadStatuses</c> half of the guard passes everything, and the only test that would have
+    /// noticed is gated behind a live cluster and therefore skipped. The same reasoning that made
+    /// the SARIF reader internal-but-tested applies: a cross-repo string contract proven only
+    /// through a whole pipeline is a contract that is not proven in CI at all.
+    /// </para>
     /// </remarks>
-    private static KnowledgeChunk ToChunk(IReadOnlyDictionary<string, Value> payload, float score)
+    internal static KnowledgeChunk ToChunk(IReadOnlyDictionary<string, Value> payload, float score)
     {
         CorpusWire.TryReadSource(Text(payload, CorpusFields.Source), out var source);
 
