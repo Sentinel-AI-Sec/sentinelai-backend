@@ -203,9 +203,9 @@ dotnet test SentinelAI.slnx
 
 | What you have | Expect |
 |---|---|
-| Nothing but the code | **~770 passed, ~31 skipped, 0 failed** |
+| Nothing but the code | **851 passed, 31 skipped, 0 failed** |
 | \+ Docker (§2) | \+8 adapter tests |
-| \+ a corpus (§3) | \+17 live-corpus tests |
+| \+ a corpus (§3) | \+17 live-corpus tests → **876 passed, 6 skipped** |
 
 **Skips are not failures.** Each says what it needs. The six that always skip need the
 `sentinelai-fixtures` repo and belong to a different story.
