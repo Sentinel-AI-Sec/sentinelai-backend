@@ -67,6 +67,12 @@ docker compose -f compose.knowledge.yaml --profile full up -d --build embedder
 > skips baking the weights; the model then downloads on first use instead. Fine locally, wrong for
 > anything shared.
 
+> **Downloads are rate-limited without a token.** The log says so plainly —
+> `You are sending unauthenticated requests to the HF Hub`. It still works; it is just slower, and
+> on a bad day HuggingFace will throttle a 2.2 GB anonymous pull. If you have a token,
+> `HF_TOKEN=hf_… docker compose …` and add `HF_TOKEN: ${HF_TOKEN}` under the embedder's
+> `environment:`. Never commit it.
+
 Check both:
 
 ```bash
@@ -276,6 +282,9 @@ a mismatch is safe.
 | Tests say `No corpus configured` and skip | no `appsettings.Development.json` | §4 |
 | `SeedKnowledgeRetriever answered … from canned data` | no `Knowledge:Endpoint` | §4 — you are on the stub, not the corpus |
 | Ingest and query disagree on model | SEC-48 caught a real mismatch | §6 — do not disable the check |
+| `PermissionError at /home/app/.cache/huggingface/hub` | a cache volume mounted at a path the image did not contain, so Docker created it as root | fixed in the knowledge repo's Dockerfile — `git pull` there and rebuild the embedder |
+| Qdrant stuck `(unhealthy)` but answering fine | an old compose healthcheck used a bash builtin under `dash` | fixed in `compose.knowledge.yaml` — `git pull` |
+| Embedder `(healthy)` but `model_loaded: false` | expected — the model loads lazily on first use | `curl -X POST localhost:7860/warmup`, then watch `docker logs sentinelai-embedder` |
 
 ### These tests delete collections
 
