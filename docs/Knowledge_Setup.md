@@ -30,7 +30,7 @@ Clone, build, test. Nothing else.
 dotnet test SentinelAI.slnx
 ```
 
-**Expect 810 passed and 31 skipped.**
+**Expect 851 passed and 31 skipped.**
 
 The skips are **not** breakage. Twenty-five of them need infrastructure you do not have yet, and
 they say so:
@@ -168,8 +168,8 @@ Setup is in the sibling `sentinelai-knowledge` repository, at `service/README.md
 | `~QdrantKnowledgeSearchTests` | 8 | **Docker** | The adapter's filters against real Qdrant |
 | `~LiveCorpus` | 17 | **corpus** | Retrieval, a whole scan, SEC-24's guard and SEC-25's coverage against Pipeline A's knowledge |
 
-With Docker and a corpus, the full suite is **835 passed, 6 skipped**, and the retrieval
-slice above is **152 passed, 0 failed**.
+With Docker and a corpus, the full suite is **876 passed, 6 skipped**, and the retrieval
+slice above is **157 passed, 0 failed**.
 
 > **One unrelated failure is currently expected.**
 > `IngressRedactionWiringTests.The_registered_debate_engine_is_the_redacting_one` asserts that
