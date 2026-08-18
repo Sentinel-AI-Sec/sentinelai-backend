@@ -56,8 +56,11 @@ namespace SentinelAI.Application.Debate;
 /// </remarks>
 public sealed class EdgeIntegrityDebateEngine(
     IDebateEngine inner,
-    ILogger<EdgeIntegrityDebateEngine> logger) : IDebateEngine
+    ILogger<EdgeIntegrityDebateEngine> logger) : IDecoratingDebateEngine
 {
+    /// <summary>The engine this one wraps, so a wiring test can assert the chain (SEC-48 note).</summary>
+    public IDebateEngine Inner => inner;
+
     public async Task<DraftAudit> RunAsync(ScanBrief brief, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(brief);

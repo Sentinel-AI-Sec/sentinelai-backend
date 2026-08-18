@@ -33,8 +33,11 @@ namespace SentinelAI.Application.Features.Scan.Security;
 public sealed class RedactingDebateEngine(
     IDebateEngine inner,
     ISecretScanner scanner,
-    ILogger<RedactingDebateEngine> logger) : IDebateEngine
+    ILogger<RedactingDebateEngine> logger) : IDecoratingDebateEngine
 {
+    /// <summary>The engine this one wraps, so a wiring test can assert the chain (SEC-48 note).</summary>
+    public IDebateEngine Inner => inner;
+
     public Task<DraftAudit> RunAsync(ScanBrief brief, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(brief);

@@ -27,7 +27,36 @@ public class IngressRedactionWiringTests
 
         var engine = scope.ServiceProvider.GetRequiredService<IDebateEngine>();
 
-        Assert.IsType<RedactingDebateEngine>(engine);
+        // Somewhere in the chain, not outermost. SEC-50 legitimately wraps this one in its edge
+        // checker, and asserting the exact outermost type made that correct change a red build
+        // while the guarantee it was protecting still held. What SEC-33 needs is that a brief
+        // cannot reach a provider without passing the scan.
+        Assert.True(
+            engine.Wraps<RedactingDebateEngine>(),
+            "the resolved IDebateEngine does not redact anywhere in its chain: "
+            + string.Join(" -> ", engine.Unwrap().Select(e => e.GetType().Name)));
+    }
+
+    /// <summary>
+    /// The chain is exactly what the composition root builds, in order.
+    /// </summary>
+    /// <remarks>
+    /// The test above deliberately does not care about order, so on its own it would still pass if
+    /// a decorator were dropped and another added. This one pins the actual shape, so a change to
+    /// the chain is a decision someone makes here rather than something that drifts.
+    /// </remarks>
+    [Fact]
+    public void The_debate_engine_chain_is_edge_integrity_over_redaction_over_the_real_engine()
+    {
+        using var factory = new ScanApiFactory();
+        using var scope = factory.Services.CreateScope();
+
+        var chain = scope.ServiceProvider.GetRequiredService<IDebateEngine>()
+            .Unwrap().Select(e => e.GetType().Name).ToList();
+
+        Assert.Equal(
+            ["EdgeIntegrityDebateEngine", "RedactingDebateEngine", "DebateEngine"],
+            chain);
     }
 
     [Fact]
