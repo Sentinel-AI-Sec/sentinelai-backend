@@ -204,6 +204,7 @@ else, and every semantic result from it is suspect in a way nothing else reports
 |---|---:|---|---|
 | `~ChunkQualityTests` | 30 | nothing | The policy: what is dropped, what is kept, the over-fetch arithmetic |
 | `~LowQualityFilteringTests` | 7 | nothing | The guard is reached on both arms, and `k` results still come back |
+| `~DeprecatedPayloadMappingTests` | 13 | nothing | The signal survives the Qdrant payload, so the guard has something to judge |
 | `~LiveCorpusQualityTests` | 4 | **corpus** | The `status` field is really read, and the live corpus needs none of it |
 
 The keep-cases carry as much weight as the drop-cases, for §4's reason.
@@ -216,8 +217,16 @@ Two are worth singling out:
   decorative.
 - **`The_adapter_reads_the_status_field_the_guard_depends_on`** — if Pipeline A ever renames
   `status`, every chunk arrives with a null one, the deprecation check silently passes everything,
-  and nothing else in the suite notices. Same cross-repo string hazard `CorpusWire` exists to
-  contain.
+  and half the guard is switched off without a single failure to say so. Same cross-repo string
+  hazard `CorpusWire` exists to contain.
+
+That last one needs a live corpus, which means it is skipped wherever the corpus is not configured
+— including CI, where the hazard would actually be caught. `DeprecatedPayloadMappingTests` closes
+that hole by driving `QdrantKnowledgeSearch.ToChunk` directly over hand-built payload dictionaries
+(hence its `internal`): the field names in the fixtures are spelled the way the Python loaders
+spell them rather than taken from `CorpusFields`, so a rename on either side stops the two
+agreeing and fails. `A_status_stored_under_a_different_key_never_reaches_the_guard` is that failure
+staged deliberately — a retired entry the guard finds nothing wrong with.
 
 ---
 
