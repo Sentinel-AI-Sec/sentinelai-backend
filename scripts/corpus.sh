@@ -3,6 +3,7 @@
 #
 #     ./scripts/corpus.sh status
 #     ./scripts/corpus.sh snapshot          # on the machine that HAS a corpus
+#     ./scripts/corpus.sh pull              # ...or fetch one from a REMOTE corpus
 #     ./scripts/corpus.sh restore           # on every other machine
 #
 # Why this exists: the corpus is 32,432 chunks and ~130 MB of vectors, produced by an ingest
@@ -17,6 +18,10 @@
 #   QDRANT_URL   REST endpoint          (default http://localhost:6333)
 #   QDRANT_KEY   api-key, if any        (default empty — a local container needs none)
 #   SNAP_DIR     host snapshot folder   (default ./.corpus/snapshots, mounted by compose)
+#
+# For `pull`, the REMOTE corpus you are copying from:
+#   SOURCE_URL   e.g. https://<cluster>.cloud.qdrant.io:6333
+#   SOURCE_KEY   its api-key
 
 set -euo pipefail
 
@@ -126,12 +131,61 @@ cmd_restore() {
   cmd_status
 }
 
+cmd_pull() {
+  if [ -z "${SOURCE_URL:-}" ]; then
+    echo "!! Set SOURCE_URL (and SOURCE_KEY) to the corpus you are copying FROM."
+    echo "   SOURCE_URL=https://<cluster>.cloud.qdrant.io:6333 SOURCE_KEY=... $0 pull"
+    exit 1
+  fi
+
+  mkdir -p "$SNAP_DIR"
+
+  src() {
+    if [ -n "${SOURCE_KEY:-}" ]; then
+      curl -sS -H "api-key: $SOURCE_KEY" -H "Content-Type: application/json" "$@"
+    else
+      curl -sS -H "Content-Type: application/json" "$@"
+    fi
+  }
+
+  echo "Pulling from $SOURCE_URL"
+  echo
+  echo "!! This creates a snapshot ON THE SOURCE, which consumes disk there."
+  echo "   A ~130MB corpus needs ~130MB of headroom; a Qdrant Cloud free tier is 1GB total."
+  echo "   Delete it afterwards from the source if space is tight."
+  echo
+
+  for c in "${COLLECTIONS[@]}"; do
+    echo "snapshotting $c on the source..."
+    out="$(src -X POST "$SOURCE_URL/collections/$c/snapshots")"
+    name="$(echo "$out" | grep -oE '"name":"[^"]+"' | head -1 | cut -d'"' -f4)"
+
+    if [ -z "$name" ]; then
+      echo "!! No snapshot name came back. Response: $out"
+      exit 1
+    fi
+
+    echo "downloading $name ..."
+    src -o "$SNAP_DIR/$name" "$SOURCE_URL/collections/$c/snapshots/$name"
+
+    if [ ! -s "$SNAP_DIR/$name" ]; then
+      echo "!! Downloaded file is empty: $SNAP_DIR/$name"
+      exit 1
+    fi
+    echo "   -> $(du -h "$SNAP_DIR/$name" | cut -f1)"
+  done
+
+  echo
+  echo "Now load them into the local Qdrant:  $0 restore"
+}
+
 case "${1:-status}" in
   status)   cmd_status ;;
   snapshot) cmd_snapshot ;;
+  pull)     cmd_pull ;;
   restore)  cmd_restore ;;
   *)
-    echo "usage: $0 {status|snapshot|restore}"
+    echo "usage: $0 {status|snapshot|pull|restore}"
     exit 2
     ;;
 esac

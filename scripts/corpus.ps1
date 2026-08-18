@@ -11,15 +11,20 @@
 .EXAMPLE
   ./scripts/corpus.ps1 status
   ./scripts/corpus.ps1 snapshot     # on the machine that HAS a corpus
+  ./scripts/corpus.ps1 pull -SourceUrl https://<cluster>.cloud.qdrant.io:6333 -SourceKey <key>
   ./scripts/corpus.ps1 restore      # on every other machine
 #>
 param(
-  [ValidateSet('status', 'snapshot', 'restore')]
+  [ValidateSet('status', 'snapshot', 'pull', 'restore')]
   [string]$Command = 'status',
 
   [string]$QdrantUrl = $(if ($env:QDRANT_URL) { $env:QDRANT_URL } else { 'http://localhost:6333' }),
   [string]$QdrantKey = $env:QDRANT_KEY,
-  [string]$SnapDir   = $(Join-Path (Split-Path $PSScriptRoot -Parent) '.corpus/snapshots')
+  [string]$SnapDir   = $(Join-Path (Split-Path $PSScriptRoot -Parent) '.corpus/snapshots'),
+
+  # For -Command pull: the REMOTE corpus being copied FROM.
+  [string]$SourceUrl = $env:SOURCE_URL,
+  [string]$SourceKey = $env:SOURCE_KEY
 )
 
 $ErrorActionPreference = 'Stop'
@@ -104,8 +109,44 @@ function Restore-Snapshot {
   Show-Status
 }
 
+function Get-RemoteSnapshot {
+  if (-not $SourceUrl) {
+    Write-Host "!! Set -SourceUrl (and -SourceKey) to the corpus you are copying FROM."
+    exit 1
+  }
+  if (-not (Test-Path $SnapDir)) { New-Item -ItemType Directory -Force -Path $SnapDir | Out-Null }
+
+  $srcHeaders = @{ 'Content-Type' = 'application/json' }
+  if ($SourceKey) { $srcHeaders['api-key'] = $SourceKey }
+
+  Write-Host "Pulling from $SourceUrl"
+  Write-Host ""
+  Write-Host "!! This creates a snapshot ON THE SOURCE, which consumes disk there."
+  Write-Host "   A ~130MB corpus needs ~130MB of headroom; a Qdrant Cloud free tier is 1GB total."
+  Write-Host ""
+
+  foreach ($c in $Collections) {
+    Write-Host "snapshotting $c on the source..."
+    $r = Invoke-RestMethod -Method Post -Uri "$SourceUrl/collections/$c/snapshots" -Headers $srcHeaders
+    $name = $r.result.name
+    if (-not $name) { Write-Host "!! No snapshot name came back."; exit 1 }
+
+    Write-Host "downloading $name ..."
+    $dest = Join-Path $SnapDir $name
+    Invoke-WebRequest -Uri "$SourceUrl/collections/$c/snapshots/$name" -Headers $srcHeaders -OutFile $dest
+
+    $size = (Get-Item $dest).Length
+    if ($size -eq 0) { Write-Host "!! Downloaded file is empty: $dest"; exit 1 }
+    Write-Host ("   -> {0:N1} MB" -f ($size / 1MB))
+  }
+
+  Write-Host ""
+  Write-Host "Now load them into the local Qdrant:  ./scripts/corpus.ps1 restore"
+}
+
 switch ($Command) {
   'status'   { Show-Status }
   'snapshot' { New-Snapshot }
+  'pull'     { Get-RemoteSnapshot }
   'restore'  { Restore-Snapshot }
 }

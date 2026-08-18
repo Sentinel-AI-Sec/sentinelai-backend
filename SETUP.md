@@ -135,7 +135,26 @@ an afternoon, and produces a corpus with a *different* `corpus_version`. SEC-48 
 as different corpora — correctly. A snapshot is the same bytes everywhere, so every machine
 retrieves against one corpus and audits stay comparable.
 
-### 3b. Build one from scratch — only if you must
+### 3b. Pull one from a cluster that already has it
+
+If the team's corpus lives on Qdrant Cloud (or any reachable Qdrant), copy it down without
+touching the ingest:
+
+```bash
+SOURCE_URL=https://<cluster>.cloud.qdrant.io:6333 SOURCE_KEY=<key> ./scripts/corpus.sh pull
+./scripts/corpus.sh restore
+```
+
+```powershell
+./scripts/corpus.ps1 pull -SourceUrl https://<cluster>.cloud.qdrant.io:6333 -SourceKey <key>
+./scripts/corpus.ps1 restore
+```
+
+> **This creates a snapshot on the source**, which consumes disk there — about 130 MB. A Qdrant
+> Cloud free tier is 1 GB total, so check headroom first and delete the snapshot from the source
+> afterwards if space is tight. It is otherwise non-destructive: nothing on the source is modified.
+
+### 3c. Build one from scratch — only if you must
 
 In `sentinelai-knowledge`: install with the `embed` extra, fetch the sources, and run the notebook
 through the Qdrant cells. It writes `out/corpus_manifest.json`, which §4 points the backend at.
