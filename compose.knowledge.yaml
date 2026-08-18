@@ -39,7 +39,10 @@ services:
     healthcheck:
       # /readyz, not /healthz: Qdrant answers healthz before collections are loadable, and a
       # restore that starts in that window fails in a way that looks like a corrupt snapshot.
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/6333 && echo -e 'GET /readyz HTTP/1.1\\r\\nhost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q '200 OK'"]
+      # bash explicitly: /dev/tcp is a bash builtin and CMD-SHELL runs dash, which fails
+      # with "cannot create /dev/tcp/..." and marks a healthy Qdrant unhealthy forever.
+      # The image ships no curl and no wget, so this is the check available to us.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333 && printf 'GET /readyz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && head -1 <&3 | grep -q '200 OK'"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -56,11 +59,15 @@ services:
     restart: unless-stopped
     ports:
       - "7860:7860"
-    environment:
-      # Cached weights live in a volume so a rebuild does not re-download 2.2 GB.
-      HF_HOME: /cache/huggingface
     volumes:
-      - embedder-cache:/cache/huggingface
+      # Mounted at the image's OWN cache path, not a new one. The Dockerfile creates user
+      # app (uid 1000), chowns /home/app, and runs as that user. A named volume mounted
+      # anywhere else is created owned by root, and the first download dies with
+      # "PermissionError at /cache/huggingface" -- which reads like a network fault.
+      # Mounting over a path that exists in the image inherits its ownership instead.
+      #
+      # Purpose unchanged: weights survive a rebuild rather than re-downloading 2.2 GB.
+      - embedder-cache:/home/app/.cache/huggingface
     healthcheck:
       # A long start_period on purpose: the model loads lazily on first use and a cold CPU
       # load takes minutes. Marking it unhealthy before then would restart it forever.
