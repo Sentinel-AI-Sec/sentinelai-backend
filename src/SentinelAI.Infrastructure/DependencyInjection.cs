@@ -38,7 +38,9 @@ public static class DependencyInjection
         // request, and refuses to assume anything when there is one.
         services.AddScoped<AssumableCallerContext>();
         services.AddScoped<ICallerContext>(sp => sp.GetRequiredService<AssumableCallerContext>());
-        services.AddScoped<ICorpusVersionProvider, ConfiguredCorpusVersionProvider>();
+        // SEC-48: the stamp comes from the manifest Pipeline A published, falling back to the
+        // configured constant only when this deployment has no manifest to read.
+        services.AddScoped<ICorpusVersionProvider, ManifestCorpusVersionProvider>();
         services.AddScoped<IBundleInspector, TarGzBundleInspector>();
         services.AddScoped<IBundleStore, FileSystemBundleStore>();
 
@@ -88,6 +90,12 @@ public static class DependencyInjection
         // SEC-21's RetrievalQueryBuilder for the query text, so there is one query builder.
         // QdrantKnowledgeSearch is a singleton because QdrantClient is designed to be shared and
         // multiplexes over one gRPC channel.
+        // ---- SEC-48: the A-to-B boundary --------------------------------------------------
+        // Singleton and read-once: the manifest describes a corpus that was built before this
+        // process started and cannot change under it.
+        services.Configure<CorpusManifestOptions>(configuration.GetSection(CorpusManifestOptions.SectionName));
+        services.AddSingleton<ICorpusManifestSource, FileCorpusManifestSource>();
+
         services.Configure<QdrantOptions>(configuration.GetSection(QdrantOptions.SectionName));
         services.AddSingleton<QdrantKnowledgeSearch>();
         services.AddSingleton<IKnowledgeSearch>(sp => sp.GetRequiredService<QdrantKnowledgeSearch>());
@@ -102,12 +110,17 @@ public static class DependencyInjection
         if (embedder?.IsConfigured == true)
         {
             services.AddHttpClient<IQueryEmbedder, HttpQueryEmbedder>();
-            services.AddHostedService<KnowledgeReadinessService>();
         }
         else
         {
             services.AddSingleton<IQueryEmbedder, NotConfiguredQueryEmbedder>();
         }
+
+        // SEC-48: registered whether or not an embedding service exists. The manifest comparison
+        // costs nothing and catches the mismatch that produces confident, meaningless results —
+        // gating it on the optional half would skip it on most deployments.
+        services.AddSingleton<CorpusBoundaryGuard>();
+        services.AddHostedService<KnowledgeReadinessService>();
 
         services.AddScoped<Application.Features.Scan.Retrieval.KnowledgeRetrievalService>();
 

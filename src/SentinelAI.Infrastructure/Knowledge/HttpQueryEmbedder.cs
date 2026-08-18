@@ -170,8 +170,17 @@ public sealed class HttpQueryEmbedder : IQueryEmbedder
     /// it verified nothing stronger, rather than reporting a pass that sounds like more than it is.
     /// </para>
     /// </remarks>
-    public async Task VerifyParityAsync(CancellationToken ct = default)
+    /// <param name="baseline">
+    /// Norms recorded by the ingest, from Pipeline A's manifest (SEC-48). Null falls back to
+    /// <c>Knowledge:Embedder:ExpectedNorms</c>. The manifest is the better source: it was written
+    /// by the process that did the embedding, whereas the configured copy is a number a human
+    /// transcribed and can therefore be stale in a way nothing detects.
+    /// </param>
+    public async Task VerifyParityAsync(
+        IReadOnlyList<double>? baseline = null, CancellationToken ct = default)
     {
+        var expected = baseline is { Count: > 0 } ? [.. baseline] : _options.ExpectedNorms;
+
         var parity = await GetAsync<ParityResponse>(
             "parity", TimeSpan.FromSeconds(_options.ColdStartTimeoutSeconds), ct);
 
@@ -185,7 +194,7 @@ public sealed class HttpQueryEmbedder : IQueryEmbedder
                 + "the same model, or similarity scores are meaningless and nothing errors.");
         }
 
-        if (_options.ExpectedNorms.Length == 0)
+        if (expected.Length == 0)
         {
             _logger.LogWarning(
                 "Embedding service at {BaseUrl} reports {Model} at {Dim} dimensions. No parity "
@@ -197,22 +206,22 @@ public sealed class HttpQueryEmbedder : IQueryEmbedder
             return;
         }
 
-        if (parity.Norms.Count != _options.ExpectedNorms.Length)
+        if (parity.Norms.Count != expected.Length)
         {
             throw new InvalidOperationException(
-                $"The parity baseline has {_options.ExpectedNorms.Length} norm(s) but the service "
+                $"The parity baseline has {expected.Length} norm(s) but the service "
                 + $"returned {parity.Norms.Count}. They come from the same probe list, so a "
                 + "different count means the baseline was taken from a different version.");
         }
 
         for (var i = 0; i < parity.Norms.Count; i++)
         {
-            var drift = Math.Abs(parity.Norms[i] - _options.ExpectedNorms[i]);
+            var drift = Math.Abs(parity.Norms[i] - expected[i]);
             if (drift <= _options.ParityTolerance) continue;
 
             throw new InvalidOperationException(
                 $"Parity probe {i} drifted by {drift:G6}, over the {_options.ParityTolerance:G6} "
-                + $"tolerance (corpus {_options.ExpectedNorms[i]:G9}, service {parity.Norms[i]:G9}). "
+                + $"tolerance (corpus {expected[i]:G9}, service {parity.Norms[i]:G9}). "
                 + "GPU-versus-CPU rounding does not move these numbers this far; a different model "
                 + "does. Refusing to query a corpus this embedder did not build.");
         }

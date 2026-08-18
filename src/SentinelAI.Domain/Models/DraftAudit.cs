@@ -60,6 +60,27 @@ public sealed record DraftAudit
     /// </summary>
     public AuditCost Cost { get; init; } = AuditCost.None;
 
+    /// <summary>
+    /// The corpus snapshot this audit's knowledge actually came from (SEC-48).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Observed, not configured.</b> It is read off the chunks retrieval returned, so it
+    /// records the corpus that answered rather than the one settings claimed would. Those can
+    /// differ — a cluster re-ingested between accepting a job and running it is the obvious case —
+    /// and when they do, the retrieved value is the one the citations rest on.
+    /// </para>
+    /// <para>
+    /// Empty when nothing was retrieved, or when the corpus predates the payload field. That is
+    /// distinguishable from a real version, which is the point: an audit that cannot name its
+    /// corpus should not appear to.
+    /// </para>
+    /// </remarks>
+    public string CorpusVersion { get; init; } = string.Empty;
+
+    /// <summary>True when this audit can name the corpus its citations came from.</summary>
+    public bool HasCorpusVersion => !string.IsNullOrWhiteSpace(CorpusVersion);
+
     /// <summary>Non-negotiable framing per AID-01 section 7.</summary>
     public string Disclaimer =>
         "Prioritized draft audit for human review — not a verified verdict.";

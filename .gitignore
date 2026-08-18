@@ -450,3 +450,5 @@ FodyWeavers.xsd
 *.msp
 
 .idea/
+# SEC-48 corpus snapshots: ~130MB of vectors, not source.
+.corpus/

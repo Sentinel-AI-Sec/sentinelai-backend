@@ -93,9 +93,13 @@ public sealed class ThinSlicePipeline(
         var handoff = AttackGraphHandoff.From(tenantId, scanJobId, candidates ?? []);
 
         // ---- Stage 3: retrieve, once per agent (SEC-23) -----------------------------------
+        // SEC-48: the corpus version is collected from the chunks themselves as they come back,
+        // so the audit records what actually answered rather than what settings predicted.
         var byRole = new Dictionary<AgentRole, IReadOnlyList<string>>();
+        var corpusVersions = new HashSet<string>(StringComparer.Ordinal);
+
         foreach (var role in RetrievingRoles)
-            byRole[role] = await RetrieveAsync(findings, handoff, role, ct);
+            byRole[role] = await RetrieveAsync(findings, handoff, role, corpusVersions, ct);
 
         // The union, for the report's citations: a chunk cited by either agent is knowledge the
         // audit rests on, and the report does not care which of them fetched it.
@@ -109,7 +113,7 @@ public sealed class ThinSlicePipeline(
         // which is what keeps "no graph stage ran yet" and "the graph stage ran and found no
         // edges" from being confused with each other.
         var brief = briefRenderer.Render(scanJobId, findings, nodes, byRole, graph is { Count: > 0 } ? edges : null);
-        var audit = await debate.RunAsync(brief, ct);
+        var audit = await debate.RunAsync(brief, ct) with { CorpusVersion = CorpusVersionOf(corpusVersions) };
 
         // ---- Stage 5: report --------------------------------------------------------------
         var report = reportBuilder.Build(
@@ -193,9 +197,40 @@ public sealed class ThinSlicePipeline(
     /// skipped and counted — it has nothing the corpus can be keyed on, which is the gap SEC-15's
     /// table exists to close.
     /// </remarks>
+    /// <summary>
+    /// The corpus version this run's citations rest on (SEC-48).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Empty when nothing was retrieved. An audit with no knowledge behind it should not name a
+    /// corpus, because it did not use one — and a stamp taken from configuration would let it
+    /// claim provenance it has not got.
+    /// </para>
+    /// <para>
+    /// <b>More than one version is a real anomaly, so it is reported rather than resolved.</b> It
+    /// means the collections were re-ingested while this scan was running, or that two corpora are
+    /// mixed in one cluster. Picking the newest, or the most common, would produce a plausible
+    /// single answer and hide the fact that the citations are not all from the same snapshot.
+    /// </para>
+    /// </remarks>
+    private string CorpusVersionOf(IReadOnlyCollection<string> observed)
+    {
+        if (observed.Count == 0) return string.Empty;
+        if (observed.Count == 1) return observed.First();
+
+        var all = observed.OrderBy(v => v, StringComparer.Ordinal).ToList();
+
+        logger.LogWarning(
+            "Retrieval returned chunks from {Count} corpus versions ({Versions}). The collections "
+            + "were re-ingested mid-scan, or two corpora share this cluster; the audit records all "
+            + "of them rather than picking one", all.Count, string.Join(", ", all));
+
+        return string.Join(", ", all);
+    }
+
     private async Task<IReadOnlyList<string>> RetrieveAsync(
         IReadOnlyList<Finding> findings, AttackGraphHandoff handoff, AgentRole role,
-        CancellationToken ct)
+        HashSet<string> corpusVersions, CancellationToken ct)
     {
         var chunks = new List<string>();
         var seenQueries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -218,9 +253,15 @@ public sealed class ThinSlicePipeline(
             // established it for.
             var result = await retriever.RetrieveAsync(finding, AgentRetrieval.IntentFor(role)!.Value, ct);
 
-            foreach (var text in result.Chunks.Select(c => $"[{c.ChunkId}] {c.Text}"))
+            foreach (var chunk in result.Chunks)
+            {
+                if (!string.IsNullOrWhiteSpace(chunk.CorpusVersion))
+                    corpusVersions.Add(chunk.CorpusVersion);
+
+                var text = $"[{chunk.ChunkId}] {chunk.Text}";
                 if (!chunks.Contains(text, StringComparer.Ordinal))
                     chunks.Add(text);
+            }
         }
 
         if (unlinked > 0)
