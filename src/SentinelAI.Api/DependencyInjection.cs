@@ -64,6 +64,51 @@ public static class DependencyInjection
         services.AddHttpsRedirection(options =>
             options.HttpsPort = configuration.GetValue(HttpsPortKey, 443));
 
+        // ---- SEC-42/SEC-40: the dashboard is a cross-origin caller ------------------------
+        // The Angular UI was written against a same-origin dev proxy, which exists only on a
+        // developer's machine. Deployed, the SPA is served from its own host and this API from
+        // an Azure Container App, so every read call is cross-origin and the browser refuses it
+        // before the request is ever sent. Nothing in this repo's tests or in curl reproduces
+        // that — CORS is enforced by the browser alone — so it has to be configured deliberately
+        // rather than discovered.
+        services.AddCors(options => options.AddPolicy(UiCorsPolicy, policy =>
+        {
+            // Read inside the delegate for the same reason the JWT options above do: this runs
+            // when CorsOptions is first resolved (first request in), by which point every
+            // configuration source has been merged — including ones layered on after this
+            // method returns, which is how the integration suite supplies its origins.
+            //
+            // The origin list is an array so a deployment can supply it through environment
+            // variables (Cors__AllowedOrigins__0, __1, ...) without a config file, which is all
+            // Container Apps gives us.
+            var allowedOrigins = configuration.GetSection(CorsAllowedOriginsKey).Get<string[]>() ?? [];
+
+            // A browser's Origin header is scheme+host+port with no trailing slash, and a
+            // configured value copied out of a browser address bar almost always has one.
+            // WithOrigins compares ordinally, so "https://ui.example.com/" matches nothing and
+            // the failure looks identical to having configured no origins at all.
+            allowedOrigins = [.. allowedOrigins
+                .Where(origin => !string.IsNullOrWhiteSpace(origin))
+                .Select(origin => origin.Trim().TrimEnd('/'))];
+
+            // Explicit origins, never AllowAnyOrigin. The UI authenticates with a bearer token,
+            // so the policy has to permit credentialed requests, and ASP.NET Core rejects
+            // AllowCredentials combined with a wildcard at runtime — as it should, since that
+            // pairing lets any site on the internet make authenticated calls on a signed-in
+            // user's behalf.
+            //
+            // An empty list therefore denies every origin rather than allowing all of them.
+            // That is the whole point: a deployment that forgets this setting gets a UI that
+            // visibly cannot reach the API, which someone fixes in minutes. The convenient
+            // fallback — treating "unconfigured" as "allow anything" — turns the same mistake
+            // into an API silently open to every origin, with nothing failing to reveal it.
+            policy
+                .WithOrigins(allowedOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+        }));
+
         return services;
     }
 
@@ -75,6 +120,19 @@ public static class DependencyInjection
 
     /// <summary>Port the HTTPS redirect targets. 443 unless the deployment says otherwise.</summary>
     public const string HttpsPortKey = "Security:HttpsPort";
+
+    /// <summary>
+    /// Origins the dashboard may call this API from (SEC-42/SEC-40). A string array, so a
+    /// deployment supplies it as <c>Cors__AllowedOrigins__0</c>, <c>__1</c>, and so on. Absent
+    /// or empty means no cross-origin caller is allowed — see <see cref="UiCorsPolicy"/>.
+    /// </summary>
+    public const string CorsAllowedOriginsKey = "Cors:AllowedOrigins";
+
+    /// <summary>
+    /// The single named CORS policy. Named rather than default so <c>UseCors</c> fails loudly
+    /// on a typo instead of quietly applying a policy nobody configured.
+    /// </summary>
+    public const string UiCorsPolicy = "SentinelAiUi";
 
     public static WebApplication UseApiServices(this WebApplication app)
     {
@@ -97,6 +155,20 @@ public static class DependencyInjection
             app.UseHsts();
             app.UseHttpsRedirection();
         }
+
+        // ---- SEC-42/SEC-40: cross-origin access for the dashboard -------------------------
+        // Position is the whole of this line's correctness.
+        //
+        // After the HTTPS block, because a request that is going to be redirected should be
+        // redirected, not decorated with headers granting access to a response it will not get.
+        //
+        // Before UseAuthentication, because a preflight is an unauthenticated OPTIONS request
+        // that the browser sends on its own: it carries no Authorization header, by design and
+        // with no way for the SPA to add one. Authenticate first and every preflight to a
+        // [Authorize]'d endpoint is answered 401 before the CORS middleware can short-circuit
+        // it, the browser never issues the real request, and the API looks broken while its
+        // logs show only 401s that never had a token to begin with.
+        app.UseCors(UiCorsPolicy);
 
         app.UseAuthentication();
         app.UseAuthorization();
