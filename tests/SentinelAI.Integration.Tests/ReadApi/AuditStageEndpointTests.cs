@@ -107,6 +107,37 @@ public class AuditStageEndpointTests : IClassFixture<ScanApiFactory>
     }
 
     [Fact]
+    public async Task The_scan_itself_names_the_report_so_a_worker_driven_run_can_be_followed()
+    {
+        // Route B returns report_id from POST /audit, which is fine when a caller drove the
+        // audit. SEC-46's worker drives it instead, and nothing receives that response — so
+        // the id has to be reachable from the scan the Action already polls, or the report
+        // exists and no caller can find it. That is exactly what happened on the first live
+        // fixture run: the audit completed, the report was retained, and the id had to be
+        // read out of SQL by hand.
+        var jobId = await SeedScannedJobAsync(retainReport: true);
+        var client = ClientWith(AuthScopes.ScanWrite, AuthScopes.ReportRead);
+
+        var before = await ReadApiFixture.JsonAsync(await client.GetAsync($"/v1/scans/{jobId}"));
+        Assert.Equal(
+            JsonValueKind.Null,
+            before.GetProperty("data").GetProperty("reportId").ValueKind);
+
+        await client.PostAsync($"/v1/scans/{jobId}/audit", null);
+
+        var after = await ReadApiFixture.JsonAsync(await client.GetAsync($"/v1/scans/{jobId}"));
+        var reportId = after.GetProperty("data").GetProperty("reportId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(reportId));
+
+        // Reachable, not merely present: the id the scan hands back fetches the report.
+        var read = await client.GetAsync($"/v1/reports/{reportId}");
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+        Assert.Equal(
+            jobId.ToString(),
+            (await ReadApiFixture.JsonAsync(read)).GetProperty("scan_job_id").GetString());
+    }
+
+    [Fact]
     public async Task Without_the_opt_in_the_audit_still_runs_but_nothing_is_kept()
     {
         // SEC-35's second rule, visible through SEC-40's own endpoint. The caller gets their
