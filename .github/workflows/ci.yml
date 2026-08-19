@@ -176,3 +176,119 @@ jobs:
             exit 1
           fi
           echo "No connection-string passwords found."
+
+  # ---------------------------------------------------------------------------------------
+  # Publish to Azure Container Apps.
+  #
+  # Deliberately the only job here that touches anything outside the checkout, and the only
+  # one that needs credentials. It runs on a green build or not at all: `needs` covers the
+  # test suite, the EF drift check and the secret scan, so a red suite cannot ship.
+  #
+  # Publishing uses the .NET SDK's container support, not a Dockerfile - the same path the
+  # Visual Studio profile takes. There is a Dockerfile in the repo and it still works for
+  # `docker build`, but nothing here needs a daemon.
+  #
+  # The image tag is the commit sha, so a running revision names the source it was built
+  # from. `az containerapp update` then creates a revision; existing environment variables
+  # and secrets on the app are carried over untouched, which is why none of them appear here.
+  # ---------------------------------------------------------------------------------------
+  deploy:
+    name: Publish to Azure
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [build, migrations, secrets]
+
+    # Only a real push to dev. Pull requests build and test, they do not ship - and a PR from
+    # a fork cannot be allowed near these credentials at all.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+
+    # Scoped to this job rather than the workflow, so build/migrations/secrets stay read-only.
+    # id-token is what federated (OIDC) sign-in needs; no long-lived Azure secret is stored.
+    permissions:
+      contents: read
+      id-token: write
+
+    # One deploy at a time. Two pushes in quick succession should queue, not race each other
+    # into `az containerapp update` and leave the app on whichever finished last.
+    concurrency:
+      group: deploy-azure
+      cancel-in-progress: false
+
+    environment:
+      name: production
+      url: https://${{ vars.AZURE_APP_FQDN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Sign in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Schema first, image second, and never the other way round.
+      #
+      # Nothing calls Migrate() at startup, so a container carrying a migration the database
+      # has not seen fails on the first query that touches the new column - and it fails at
+      # read time, on a revision that already reports Healthy. Applying here means a failed
+      # migration stops the deploy instead of producing a half-working app.
+      - name: Install EF tools
+        run: dotnet tool install --global dotnet-ef --version 10.0.*
+
+      - name: Apply migrations
+        env:
+          ConnectionStrings__DefaultConnection: ${{ secrets.AZURE_SQL_CONNECTION_STRING }}
+        run: >
+          dotnet ef database update
+          --project src/SentinelAI.Infrastructure
+          --startup-project src/SentinelAI.Api
+          --configuration Release
+
+      - name: Sign in to the container registry
+        run: az acr login -n ${{ vars.AZURE_ACR_NAME }}
+
+      - name: Build and push the image
+        run: >
+          dotnet publish src/SentinelAI.Api/SentinelAI.Api.csproj
+          -c Release
+          -r linux-x64
+          --no-self-contained
+          -t:PublishContainer
+          -p:ContainerRegistry=${{ vars.AZURE_ACR_NAME }}.azurecr.io
+          -p:ContainerRepository=sentinelai-api
+          -p:ContainerImageTag=${{ github.sha }}
+
+      - name: Roll the container app onto the new image
+        run: >
+          az containerapp update
+          -n ${{ vars.AZURE_APP_NAME }}
+          -g ${{ vars.AZURE_RESOURCE_GROUP }}
+          --image ${{ vars.AZURE_ACR_NAME }}.azurecr.io/sentinelai-api:${{ github.sha }}
+          -o none
+
+      # A successful `az containerapp update` means the revision was created, not that the
+      # app came up: every boot failure this deployment has had - a missing model key, an
+      # unwritable bundle path - produced exactly that, a green deploy and a dead app.
+      #
+      # 405 is the pass. /v1/scans is POST-only, so Method Not Allowed proves the route is
+      # mapped and the app is serving. 404 would mean it started but mapped nothing; 503 or
+      # a connection failure means no healthy replica.
+      - name: Smoke-test the deployed app
+        run: |
+          fqdn='${{ vars.AZURE_APP_FQDN }}'
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "https://$fqdn/v1/scans" || echo 000)
+            echo "attempt $attempt: HTTP $code"
+            [ "$code" = "405" ] && echo "::notice::Deployed and serving at https://$fqdn" && exit 0
+            sleep 20
+          done
+          echo "::error::App did not answer 405 on /v1/scans after the roll-out. Check the container logs:"
+          echo "  az containerapp logs show -n ${{ vars.AZURE_APP_NAME }} -g ${{ vars.AZURE_RESOURCE_GROUP }} --type console --tail 60"
+          exit 1
