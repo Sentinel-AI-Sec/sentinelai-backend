@@ -239,6 +239,18 @@ jobs:
       # has not seen fails on the first query that touches the new column - and it fails at
       # read time, on a revision that already reports Healthy. Applying here means a failed
       # migration stops the deploy instead of producing a half-working app.
+      # Neither the migration step nor the container publish restores on its own, and
+      # dotnet ef fails with NETSDK1004 long before it reaches the database.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore SentinelAI.slnx
+
       - name: Install EF tools
         run: dotnet tool install --global dotnet-ef --version 10.0.*
 
