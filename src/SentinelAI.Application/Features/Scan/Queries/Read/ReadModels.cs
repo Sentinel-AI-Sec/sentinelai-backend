@@ -57,6 +57,20 @@ internal static class Wire
     public static string Of(ChainStatus status) => status.ToString().ToLowerInvariant();
 
     /// <summary>
+    /// Job status and pipeline stage, for the list endpoints.
+    /// </summary>
+    /// <remarks>
+    /// The older <c>GET /v1/scans/{id}</c> answers inside the <c>Response</c> envelope and lets
+    /// the serializer render these two as integers. The list endpoints do not copy that: a
+    /// <c>"status": 2</c> in a table row is meaningless to read and changes meaning the day a
+    /// member is inserted into the enum. Both spellings coexist because the poll endpoint's shape
+    /// is already depended on and this is a new one — see <c>docs/Read_API.md</c>.
+    /// </remarks>
+    public static string Of(ScanStatus status) => status.ToString().ToLowerInvariant();
+
+    public static string Of(ScanStage stage) => stage.ToString().ToLowerInvariant();
+
+    /// <summary>
     /// Per-hop verdicts cross the wire as words for the usual reason, and for one more: the two
     /// members that are not verdicts have to be nameable. <c>"blue_verdict": "unattributed"</c>
     /// is something a screen can decline to render; <c>false</c> was not (audit 42-A).

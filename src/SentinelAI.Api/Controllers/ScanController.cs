@@ -99,11 +99,48 @@ public class ScanController(ISender sender) : ControllerBase
     }
 
     // ---- SEC-40: the read API -------------------------------------------------------------
-    // These four differ from everything above in how they answer: bare snake_case JSON on
+    // Everything below differs from everything above in how it answers: bare snake_case JSON on
     // success (the shape SentinelAI_API_Design_V2.1.md fixes and the Angular screen is built
     // against) and RFC 7807 problem+json on failure, rather than the Response envelope. The
     // envelope is unwrapped here at the edge; the handlers still return Response like every
     // other feature, so the Application layer stays free of HTTP representation concerns.
+    //
+    // 'List' and 'GetSummary' were added after the original four. They join this half rather
+    // than the envelope half above because they are read shapes a screen renders, and splitting
+    // the read API across two response formats by date of addition would be the worst of both.
+
+    /// <summary>
+    /// A page of this tenant's scans, newest first. Filter with <c>?project_id=</c>,
+    /// <c>?status=</c> (queued|running|completed|failed) and <c>?stage=</c>
+    /// (received|normalize|graph|retrieve|debate|report); page with <c>?cursor=</c> and
+    /// <c>?limit=</c>.
+    /// </summary>
+    /// <remarks>
+    /// This shares a route template with <c>POST /v1/scans</c> and differs only by verb, and it
+    /// cannot collide with <c>GET /v1/scans/{id}</c> either: that route's <c>:guid</c> constraint
+    /// matches only a segment that parses as a GUID, and this one has no segment at all.
+    /// </remarks>
+    [HttpGet]
+    public async Task<IActionResult> List(
+        [FromQuery] string? cursor,
+        [FromQuery] int? limit,
+        [FromQuery(Name = "project_id")] Guid? projectId,
+        [FromQuery] string? status,
+        [FromQuery] string? stage,
+        CancellationToken ct) =>
+        Render(await sender.Send(new ListScansQuery(cursor, limit, projectId, status, stage), ct));
+
+    /// <summary>
+    /// Counts for one scan: findings by layer and severity, the graph's size, chains by status.
+    /// </summary>
+    /// <remarks>
+    /// The total the paged endpoints cannot give. A cursor-paged response knows only what it
+    /// returned, so a screen filtering findings can honestly say how many rows it has loaded and
+    /// not how many exist — this endpoint is where that number comes from.
+    /// </remarks>
+    [HttpGet("{id:guid}/summary")]
+    public async Task<IActionResult> GetSummary(Guid id, CancellationToken ct) =>
+        Render(await sender.Send(new GetScanSummaryQuery(id), ct));
 
     /// <summary>Provenance of the bundle the runner uploaded. Survives the bundle's purge.</summary>
     [HttpGet("{id:guid}/bundle")]
