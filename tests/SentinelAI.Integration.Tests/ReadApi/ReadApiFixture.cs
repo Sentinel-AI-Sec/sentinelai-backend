@@ -110,7 +110,10 @@ internal sealed class ReadApiFixture(ScanApiFactory factory)
             db.ChainHops.Add(new ChainHop
             {
                 Id = Guid.CreateVersion7(), TenantId = TenantId, ChainId = chain.Id,
-                EdgeId = edge.Id, HopOrder = 1, TechniqueId = "T1190", BlueValidated = true,
+                // blue_validated is derived from the verdict now (audit 42-A), so a fixture that
+                // wants a validated hop states the verdict that makes it one.
+                EdgeId = edge.Id, HopOrder = 1, TechniqueId = "T1190",
+                BlueVerdict = HopVerdict.Confirmed,
             });
 
             var report = new Report

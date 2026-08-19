@@ -56,6 +56,13 @@ internal static class Wire
     public static string Of(Confidence confidence) => confidence.ToString().ToLowerInvariant();
     public static string Of(ChainStatus status) => status.ToString().ToLowerInvariant();
 
+    /// <summary>
+    /// Per-hop verdicts cross the wire as words for the usual reason, and for one more: the two
+    /// members that are not verdicts have to be nameable. <c>"blue_verdict": "unattributed"</c>
+    /// is something a screen can decline to render; <c>false</c> was not (audit 42-A).
+    /// </summary>
+    public static string Of(HopVerdict verdict) => verdict.ToString().ToLowerInvariant();
+
     /// <summary>Seams cross the wire hyphenated: <c>dep-code</c>, <c>infra-spine</c>.</summary>
     public static string Of(Seam seam) => seam switch
     {
@@ -228,8 +235,45 @@ public sealed record ChainView
 public sealed record ChainHopView
 {
     [JsonPropertyName("order")] public required int Order { get; init; }
+
+    /// <summary>
+    /// The ATT&amp;CK id Red named for this hop, or empty when it named none this scan's brief
+    /// could ground (audit 42-A).
+    /// </summary>
+    /// <remarks>
+    /// <b>Empty means there is no technique to link to.</b> It is the normal answer, not a
+    /// missing value to be papered over: a renderer that appends this to
+    /// <c>https://attack.mitre.org/techniques/</c> unconditionally produces a link to MITRE's
+    /// index dressed up as a link to a specific technique, which is what audit 42-A found on
+    /// every chain in the product.
+    /// </remarks>
     [JsonPropertyName("technique_id")] public required string TechniqueId { get; init; }
+
+    /// <summary>
+    /// The narrow question: did Blue confirm this hop? True only for
+    /// <see cref="HopVerdict.Confirmed"/>.
+    /// </summary>
+    /// <remarks>
+    /// Kept on the wire because the dashboard is built against it, but it is now derived rather
+    /// than stored, and it is the lossy half of this pair. Counting <c>blue_validated</c> across
+    /// hops answers "how many did Blue confirm?" and nothing else — in particular a false here
+    /// is not a negative finding. <see cref="BlueVerdict"/> is the field that says which kind of
+    /// not-confirmed a hop is, and a summary line about a chain should be written from that one.
+    /// </remarks>
     [JsonPropertyName("blue_validated")] public required bool BlueValidated { get; init; }
+
+    /// <summary>
+    /// What Blue's turn actually said about this hop: <c>unassessed | unattributed | refuted |
+    /// unresolved | confirmed</c> (audit 42-A).
+    /// </summary>
+    /// <remarks>
+    /// The two that are not verdicts are the point. <c>unassessed</c> means no debate has run
+    /// over this chain; <c>unattributed</c> means Blue's turn was read and nothing in it could be
+    /// tied to this hop. Neither is evidence against the hop, and a screen that renders either as
+    /// a cross or a failure is stating a result nobody produced. <c>unresolved</c> is Blue's own
+    /// "the evidence cannot settle this" — also not a refutation (AID-01 §3.3).
+    /// </remarks>
+    [JsonPropertyName("blue_verdict")] public required string BlueVerdict { get; init; }
 
     /// <summary>Null on the seed hop, which arrived from nowhere.</summary>
     [JsonPropertyName("edge_confidence")] public string? EdgeConfidence { get; init; }
@@ -244,6 +288,7 @@ public sealed record ChainHopView
         Order = hop.HopOrder,
         TechniqueId = hop.TechniqueId,
         BlueValidated = hop.BlueValidated,
+        BlueVerdict = Wire.Of(hop.BlueVerdict),
         EdgeConfidence = hop.Edge is { } edge ? Wire.Of(edge.Confidence) : null,
         FindingId = hop.FindingId?.ToString(),
         NodeKey = hop.Edge is { } e && nodeKeysById.TryGetValue(e.ToNodeId, out var key) ? key : null,

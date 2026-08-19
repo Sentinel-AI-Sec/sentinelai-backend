@@ -52,7 +52,7 @@ public class ChainOutcomeWriterTests
         var chain = Chain(priority: 1);
         unitOfWork.FakeRepository<Chain>().Added.Add(chain);
 
-        await Writer(unitOfWork).ApplyAsync(Job, Audit(converged: true), CancellationToken.None);
+        await Writer(unitOfWork).ApplyAsync(Job, Audit(converged: true), brief: null, CancellationToken.None);
 
         Assert.Equal(ChainStatus.Validated, chain.Status);
         Assert.True(unitOfWork.CompleteCallCount > 0);
@@ -71,7 +71,7 @@ public class ChainOutcomeWriterTests
         unitOfWork.FakeRepository<Chain>().Added.Add(chain);
 
         var audit = Audit(converged: true, edgeIntegrityWarnings: ["N3 -> N69 does not match the graph"]);
-        await Writer(unitOfWork).ApplyAsync(Job, audit, CancellationToken.None);
+        await Writer(unitOfWork).ApplyAsync(Job, audit, brief: null, CancellationToken.None);
 
         Assert.Equal(ChainStatus.Asserted, chain.Status);
     }
@@ -86,7 +86,7 @@ public class ChainOutcomeWriterTests
         unitOfWork.FakeRepository<Chain>().Added.Add(chain);
 
         var audit = Audit(converged: false, edgeIntegrityWarnings: ["N1 -> N9 not found"]);
-        await Writer(unitOfWork).ApplyAsync(Job, audit, CancellationToken.None);
+        await Writer(unitOfWork).ApplyAsync(Job, audit, brief: null, CancellationToken.None);
 
         Assert.Equal(ChainStatus.Rejected, chain.Status);
     }
@@ -100,7 +100,8 @@ public class ChainOutcomeWriterTests
 
         // Readable, not converged, not capped — DraftAudit.Outcome's ChainBroken branch.
         await Writer(unitOfWork).ApplyAsync(
-            Job, Audit(verdictReadable: true, terminatedByTurnCap: false, converged: false), CancellationToken.None);
+            Job, Audit(verdictReadable: true, terminatedByTurnCap: false, converged: false),
+            brief: null, CancellationToken.None);
 
         Assert.Equal(ChainStatus.Rejected, chain.Status);
     }
@@ -116,7 +117,8 @@ public class ChainOutcomeWriterTests
         unitOfWork.FakeRepository<Chain>().Added.Add(chain);
 
         await Writer(unitOfWork).ApplyAsync(
-            Job, Audit(verdictReadable, terminatedByTurnCap, converged: false), CancellationToken.None);
+            Job, Audit(verdictReadable, terminatedByTurnCap, converged: false), brief: null,
+            CancellationToken.None);
 
         // Red ran and asserted something, but nothing confirmed or refuted it — "unreadable" or
         // "ran out of turns" is not evidence the chain is real or fake (AID-01 §3.3).
@@ -131,7 +133,7 @@ public class ChainOutcomeWriterTests
         var runnerUp = Chain(priority: 2);
         unitOfWork.FakeRepository<Chain>().Added.AddRange([runnerUp, flagship]);
 
-        await Writer(unitOfWork).ApplyAsync(Job, Audit(converged: true), CancellationToken.None);
+        await Writer(unitOfWork).ApplyAsync(Job, Audit(converged: true), brief: null, CancellationToken.None);
 
         Assert.Equal(ChainStatus.Validated, flagship.Status);
         Assert.Equal(ChainStatus.Candidate, runnerUp.Status);
@@ -146,7 +148,7 @@ public class ChainOutcomeWriterTests
     {
         var unitOfWork = new FakeUnitOfWork(new FakeScanJobRepository());
 
-        await Writer(unitOfWork).ApplyAsync(Job, Audit(converged: true), CancellationToken.None);
+        await Writer(unitOfWork).ApplyAsync(Job, Audit(converged: true), brief: null, CancellationToken.None);
 
         Assert.Empty(unitOfWork.FakeRepository<Chain>().Updated);
         Assert.Equal(0, unitOfWork.CompleteCallCount);
@@ -169,7 +171,7 @@ public class ChainOutcomeWriterTests
         };
         unitOfWork.FakeRepository<Chain>().Added.AddRange([thisJobsChain, otherJobsChain]);
 
-        await Writer(unitOfWork).ApplyAsync(Job, Audit(converged: true), CancellationToken.None);
+        await Writer(unitOfWork).ApplyAsync(Job, Audit(converged: true), brief: null, CancellationToken.None);
 
         Assert.Equal(ChainStatus.Validated, thisJobsChain.Status);
         Assert.Equal(ChainStatus.Candidate, otherJobsChain.Status);
