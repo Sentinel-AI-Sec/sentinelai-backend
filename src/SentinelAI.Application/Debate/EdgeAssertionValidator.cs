@@ -110,19 +110,8 @@ public static class EdgeAssertionValidator
 
         foreach (var line in assertedText.Split('\n'))
         {
-            var matches = NodeToken.Matches(line);
-            if (matches.Count < 2) continue;
-
-            for (var i = 0; i < matches.Count - 1; i++)
+            foreach (var (from, to) in ArrowJoinedPairs(line, AsciiArrow))
             {
-                if (!TryIndex(matches[i], out var from) || !TryIndex(matches[i + 1], out var to))
-                    continue;
-
-                if (from == to) continue;
-
-                var between = line[(matches[i].Index + matches[i].Length)..matches[i + 1].Index];
-                if (!between.Contains("->", StringComparison.Ordinal)) continue;
-
                 var key = (from, to);
                 if (found.ContainsKey(key)) continue; // first classification wins; duplicates are noise
 
@@ -133,6 +122,84 @@ public static class EdgeAssertionValidator
         }
 
         return [.. found.Select(kv => new HopFinding($"N{kv.Key.From}", $"N{kv.Key.To}", kv.Value))];
+    }
+
+    /// <summary>The arrow spelling this validator pairs on. Exactly what it has always used.</summary>
+    /// <remarks>
+    /// Kept as the narrow default deliberately. <see cref="HopVerdictReader"/> pairs on a wider
+    /// set, and widening it <em>here</em> would silently change which hops get reported as
+    /// unconfirmed — that is a change to what caps a chain at <c>Asserted</c> (SEC-50), not a
+    /// parsing tidy-up, and it does not belong in a ticket about per-hop fields.
+    /// </remarks>
+    internal static readonly string[] AsciiArrow = ["->"];
+
+    /// <summary>
+    /// Every ordered pair of node references on one line that has an arrow between them, in
+    /// the order they appear.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Extracted so the per-hop reader (audit 42-A) anchors on hops the same way this validator
+    /// always has, rather than growing a second, subtly different idea of what a hop line is.
+    /// Both callers therefore inherit the same two hard-won rules:
+    /// </para>
+    /// <para>
+    /// <b>The relation word is never parsed</b> — only the two node references around it. That
+    /// is what survives every format the agents have actually produced:
+    /// <c>N3 -&gt; can-access -&gt; N65</c>, <c>N3:pkg:x -&gt; technique:used-by -&gt;
+    /// evidence:N8:pkg:y</c>, <c>N30 -&gt; used-by -&gt; N1: CONFIRMED, edge N30 --used-by--&gt;
+    /// N1 exists.</c>
+    /// </para>
+    /// <para>
+    /// <b>An arrow must actually be there.</b> A live Reporter turn wrote
+    /// <c>Chain confirmed: N8 -&gt; N1 -&gt; N69 -&gt; N3 -&gt; N65, N66</c>, where the comma
+    /// lists a second branch target from <c>N3</c> rather than a hop out of <c>N65</c>. Pairing
+    /// on adjacency alone would invent that hop.
+    /// </para>
+    /// </remarks>
+    internal static IEnumerable<(int From, int To)> ArrowJoinedPairs(string line, string[] arrows)
+    {
+        var matches = NodeToken.Matches(line);
+        if (matches.Count < 2) yield break;
+
+        for (var i = 0; i < matches.Count - 1; i++)
+        {
+            if (!TryIndex(matches[i], out var from) || !TryIndex(matches[i + 1], out var to))
+                continue;
+
+            if (from == to) continue;
+
+            var between = line[(matches[i].Index + matches[i].Length)..matches[i + 1].Index];
+            if (!arrows.Any(a => between.Contains(a, StringComparison.Ordinal))) continue;
+
+            yield return (from, to);
+        }
+    }
+
+    /// <summary>
+    /// The brief's own node declarations — <c>N65=code:orderapp</c> — as index to canonical
+    /// node key.
+    /// </summary>
+    /// <remarks>
+    /// The one place the <c>N&lt;n&gt;</c> labels the agents write can be turned back into
+    /// something the database knows about. It is read out of the brief text rather than
+    /// re-derived by re-querying the nodes in the hope of getting the same order back: the
+    /// numbering is positional in whatever list <c>ScanBriefRenderer</c> was handed, and a query
+    /// with no <c>ORDER BY</c> is not a promise to return that order again. Same principle as
+    /// this class's own ground truth — the text the model read is the text we check against.
+    /// </remarks>
+    public static IReadOnlyDictionary<int, string> DeclaredNodeKeys(string briefContext)
+    {
+        var declared = new Dictionary<int, string>();
+        if (string.IsNullOrWhiteSpace(briefContext)) return declared;
+
+        foreach (Match m in NodeLabelDeclaration.Matches(briefContext))
+        {
+            if (int.TryParse(m.Groups["index"].Value, out var index))
+                declared[index] = m.Groups["label"].Value;
+        }
+
+        return declared;
     }
 
     /// <summary>Only the hops worth a human's attention — a clean transcript returns nothing.</summary>
@@ -160,13 +227,7 @@ public static class EdgeAssertionValidator
         if (string.IsNullOrWhiteSpace(briefContext) || string.IsNullOrWhiteSpace(assertedText))
             return [];
 
-        var realLabels = new Dictionary<int, string>();
-        foreach (Match m in NodeLabelDeclaration.Matches(briefContext))
-        {
-            if (int.TryParse(m.Groups["index"].Value, out var index))
-                realLabels[index] = m.Groups["label"].Value;
-        }
-
+        var realLabels = DeclaredNodeKeys(briefContext);
         if (realLabels.Count == 0) return [];
 
         var found = new Dictionary<int, NodeLabelFinding>();

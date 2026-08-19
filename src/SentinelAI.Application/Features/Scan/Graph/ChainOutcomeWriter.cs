@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using SentinelAI.Application.Debate;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
@@ -13,11 +14,27 @@ namespace SentinelAI.Application.Features.Scan.Graph;
 /// <para>
 /// <see cref="CandidateChainWriter"/> leaves every <see cref="Chain"/> at
 /// <see cref="ChainStatus.Candidate"/>, by its own comment: "Red fills the technique, Blue the
-/// validation... none of which has run at this stage." This is that later stage — but only the
-/// chain-level status, not the per-hop <see cref="ChainHop.TechniqueId"/> or
-/// <see cref="ChainHop.BlueValidated"/>. Those live in Red and Blue's free-text turns, and
-/// parsing debate prose into per-hop structured fields is exactly the "retrofit" SEC-28's own
-/// acceptance criterion says to defer, not something to improvise here.
+/// validation... none of which has run at this stage." This is that later stage, and as of
+/// audit 42-A it writes both halves: the chain-level status, <em>and</em> the per-hop
+/// <see cref="ChainHop.BlueVerdict"/> and <see cref="ChainHop.TechniqueId"/> that
+/// <see cref="HopVerdictReader"/> can recover from Red's and Blue's turns.
+/// </para>
+/// <para>
+/// This used to say per-hop fields were deferred, and they were — for long enough that the
+/// dashboard shipped "Blue validated 0 of N steps" and an empty ATT&amp;CK link on every chain
+/// the system had ever produced, because an unwritten column reads exactly like a measured
+/// zero. What changed is not confidence in parsing prose; it is that a hop the transcript does
+/// not settle is now <em>representable</em>. <see cref="HopVerdict.Unattributed"/> says "Blue
+/// was read and said nothing about this hop" and <see cref="HopVerdict.Unassessed"/> says "no
+/// debate has looked at all" — so the writer never has to choose between inventing a verdict
+/// and pretending it measured one.
+/// </para>
+/// <para>
+/// The per-hop write needs the <see cref="ScanBrief"/> as well as the audit, for the same
+/// reason <see cref="EdgeAssertionValidator"/> does: the <c>N&lt;n&gt;</c> labels the agents
+/// write mean nothing except against the brief that defined them. A null brief — a caller that
+/// has an audit but not the text behind it — writes the chain status only, which is precisely
+/// this class's behaviour before 42-A.
 /// </para>
 /// <para>
 /// The debate reasons over one graph, not one identified <see cref="Chain"/> row — SEC-26's Red
@@ -30,7 +47,14 @@ namespace SentinelAI.Application.Features.Scan.Graph;
 /// </remarks>
 public sealed class ChainOutcomeWriter(IUnitOfWork unitOfWork, ILogger<ChainOutcomeWriter> logger)
 {
-    public async Task ApplyAsync(Guid scanJobId, DraftAudit audit, CancellationToken ct)
+    /// <param name="brief">
+    /// The brief the debate actually read, or null when the caller does not have it. It is the
+    /// only thing that can turn the <c>N&lt;n&gt;</c> labels in the transcript back into node
+    /// keys, so without it the per-hop pass is skipped entirely and the hops keep whatever
+    /// verdict they already had — never a fresh <c>false</c> standing in for "we could not
+    /// look".
+    /// </param>
+    public async Task ApplyAsync(Guid scanJobId, DraftAudit audit, ScanBrief? brief, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(audit);
 
@@ -43,11 +67,142 @@ public sealed class ChainOutcomeWriter(IUnitOfWork unitOfWork, ILogger<ChainOutc
         top.Status = status;
 
         await unitOfWork.Repository<Chain>().UpdateAsync(top);
+
+        var hops = await ApplyHopOutcomesAsync(scanJobId, top, audit, brief);
+
         await unitOfWork.CompleteAsync();
 
         logger.LogInformation(
-            "Chain {ChainId} for scan job {ScanJobId} promoted to {Status} on debate outcome {Outcome}",
-            top.Id, scanJobId, status, audit.Outcome);
+            "Chain {ChainId} for scan job {ScanJobId} promoted to {Status} on debate outcome "
+            + "{Outcome}; {Confirmed} hop(s) confirmed, {Unresolved} unresolved, {Refuted} refuted, "
+            + "{Unattributed} not attributable to anything Blue said, {Techniques} with a grounded "
+            + "ATT&CK technique",
+            top.Id, scanJobId, status, audit.Outcome,
+            hops.Confirmed, hops.Unresolved, hops.Refuted, hops.Unattributed, hops.Techniques);
+    }
+
+    /// <summary>How the per-hop pass went, for one honest log line.</summary>
+    private readonly record struct HopTally(
+        int Confirmed, int Unresolved, int Refuted, int Unattributed, int Techniques)
+    {
+        /// <summary>No pass ran — not "a pass that found nothing".</summary>
+        public static HopTally NotRun => new(0, 0, 0, 0, 0);
+    }
+
+    /// <summary>
+    /// Writes what the transcript says about each hop of the chain being promoted (audit 42-A).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The last Red and Blue turns, not every turn.</b> Same choice, for the same reason, as
+    /// <see cref="EdgeIntegrityDebateEngine"/>: earlier rounds may have asserted a chain that was
+    /// then broken and abandoned, and a verdict on a hop of a discarded chain is not a verdict on
+    /// this one. A live run had Red pivot between rounds after Blue killed its first path.
+    /// </para>
+    /// <para>
+    /// <b>The top chain only.</b> Red is asked for "the strongest chain", which is the
+    /// <c>Priority == 1</c> candidate by construction, and that is the row whose status is being
+    /// promoted here. An edge Blue confirmed may well appear in some other candidate too, but
+    /// Blue judged it as a link in the chain it was shown; copying the verdict sideways would be
+    /// this class asserting something Blue did not.
+    /// </para>
+    /// <para>
+    /// <b>The seed hop can never be attributed.</b> Its <c>EdgeId</c> is null — it arrived from
+    /// nowhere — and every anchor in the transcript is a node <em>pair</em>. It stays
+    /// <see cref="HopVerdict.Unattributed"/>, which is true: Blue validates joins, and the seed
+    /// is not one.
+    /// </para>
+    /// <para>
+    /// <b>An existing technique id is never cleared.</b> Absence of an id in this transcript is
+    /// not evidence against one already recorded; a verdict, by contrast, is rewritten every time
+    /// a debate is run over the chain, because it is that debate's answer.
+    /// </para>
+    /// </remarks>
+    private async Task<HopTally> ApplyHopOutcomesAsync(
+        Guid scanJobId, Chain top, DraftAudit audit, ScanBrief? brief)
+    {
+        if (brief is null || string.IsNullOrWhiteSpace(brief.Context)) return HopTally.NotRun;
+
+        var blue = audit.Transcript.LastOrDefault(t => t.Role == AgentRole.Blue);
+        var red = audit.Transcript.LastOrDefault(t => t.Role == AgentRole.Red);
+
+        if (blue is null && red is null) return HopTally.NotRun;
+
+        var hops = (await unitOfWork.Repository<ChainHop>().GetWhereAsync(h => h.ChainId == top.Id))
+            .OrderBy(h => h.HopOrder)
+            .ToList();
+
+        if (hops.Count == 0) return HopTally.NotRun;
+
+        // The two lookups that turn a hop row back into the node pair the transcript names it by.
+        var keyByNodeId = (await unitOfWork.Repository<GraphNode>().GetWhereAsync(n => n.ScanJobId == scanJobId))
+            .ToDictionary(n => n.Id, n => n.NodeKey);
+
+        var edgesById = (await unitOfWork.Repository<GraphEdge>().GetWhereAsync(e => e.ScanJobId == scanJobId))
+            .ToDictionary(e => e.Id);
+
+        var verdicts = blue is null
+            ? new Dictionary<HopRef, HopVerdict>()
+            : HopVerdictReader.ReadVerdicts(brief.Context, blue.Content);
+
+        var techniques = red is null
+            ? new Dictionary<HopRef, string>()
+            : HopVerdictReader.ReadTechniques(brief.Context, red.Content);
+
+        var tally = HopTally.NotRun;
+
+        foreach (var hop in hops)
+        {
+            var reference = ReferenceFor(hop, edgesById, keyByNodeId);
+
+            if (blue is not null)
+            {
+                hop.BlueVerdict = reference is { } r && verdicts.TryGetValue(r, out var verdict)
+                    ? verdict
+                    // Blue was read and this hop is not in what it said. That is a fact about the
+                    // transcript, not a judgement about the hop — see HopVerdict.Unattributed.
+                    : HopVerdict.Unattributed;
+            }
+
+            if (reference is { } t && techniques.TryGetValue(t, out var technique))
+                hop.TechniqueId = technique;
+
+            tally = tally with
+            {
+                Confirmed = tally.Confirmed + (hop.BlueVerdict == HopVerdict.Confirmed ? 1 : 0),
+                Unresolved = tally.Unresolved + (hop.BlueVerdict == HopVerdict.Unresolved ? 1 : 0),
+                Refuted = tally.Refuted + (hop.BlueVerdict == HopVerdict.Refuted ? 1 : 0),
+                Unattributed = tally.Unattributed + (hop.BlueVerdict == HopVerdict.Unattributed ? 1 : 0),
+                Techniques = tally.Techniques + (hop.TechniqueId.Length > 0 ? 1 : 0),
+            };
+
+            await unitOfWork.Repository<ChainHop>().UpdateAsync(hop);
+        }
+
+        return tally;
+    }
+
+    /// <summary>
+    /// The node pair a hop row is named by in the transcript, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// Null for the seed hop, and for the shouldn't-happen cases — an edge id with no edge, an
+    /// edge whose endpoints are not among this scan's nodes. Those are returned as "cannot be
+    /// referenced" rather than thrown on: a broken lookup must cost the hop its verdict, not the
+    /// whole audit its write-back.
+    /// </remarks>
+    private static HopRef? ReferenceFor(
+        ChainHop hop,
+        IReadOnlyDictionary<Guid, GraphEdge> edgesById,
+        IReadOnlyDictionary<Guid, string> keyByNodeId)
+    {
+        if (hop.EdgeId is not { } edgeId || !edgesById.TryGetValue(edgeId, out var edge))
+            return null;
+
+        return keyByNodeId.TryGetValue(edge.FromNodeId, out var from)
+            && keyByNodeId.TryGetValue(edge.ToNodeId, out var to)
+                ? new HopRef(from, to)
+                : null;
     }
 
     /// <summary>

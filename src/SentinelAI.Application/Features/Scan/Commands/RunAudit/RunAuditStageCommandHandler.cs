@@ -74,8 +74,9 @@ public sealed class RunAuditStageCommandHandler(
 
             // SEC-28: the graph stage's own chain row otherwise stays "candidate" forever — a
             // reader of the chains endpoint could never tell a chain the debate validated from
-            // one nobody has looked at yet.
-            await chainOutcomeWriter.ApplyAsync(job.Id, result.Audit, ct);
+            // one nobody has looked at yet. The brief goes with it (audit 42-A): the per-hop
+            // verdicts are anchored on the N-labels only that text defines.
+            await chainOutcomeWriter.ApplyAsync(job.Id, result.Audit, result.Brief, ct);
 
             await AdvanceStageAsync(job, ScanStage.Report, failure: null);
 

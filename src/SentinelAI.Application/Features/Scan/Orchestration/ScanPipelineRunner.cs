@@ -244,8 +244,10 @@ public sealed class ScanPipelineRunner(
         var result = await thinSlice.RunAsync(findings, tenantId, job.Id, nodes, edges, candidates: null, ct);
 
         // SEC-28: without this the graph stage's chain rows stay "candidate" forever, and a reader
-        // could never tell a chain the debate validated from one nobody has looked at.
-        await chainOutcomeWriter.ApplyAsync(job.Id, result.Audit, ct);
+        // could never tell a chain the debate validated from one nobody has looked at. The brief
+        // is passed too (audit 42-A) — it is the only key from the transcript's N-labels back to
+        // the node keys the hop rows are joined on.
+        await chainOutcomeWriter.ApplyAsync(job.Id, result.Audit, result.Brief, ct);
 
         logger.LogInformation(
             "Stage {Stage} completed for scan job {ScanJobId}: debate {Outcome} in {Rounds} "

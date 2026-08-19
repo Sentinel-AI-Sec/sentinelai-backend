@@ -168,10 +168,17 @@ public sealed class CandidateChainWriter(
                 // The decorator already ordered them, so this is a take, not a re-sort.
                 FindingId = hop.Findings.Count > 0 ? hop.Findings[0].Id : null,
 
-                // Empty slots. Red fills the technique, Blue the validation, and the citations
-                // come from the debate transcript — none of which has run at this stage.
+                // Empty slots. Red fills the technique and Blue the verdict, both by way of
+                // ChainOutcomeWriter reading the debate transcript — none of which has run at
+                // this stage.
+                //
+                // Unassessed, emphatically not "not validated" (audit 42-A). This row is minutes
+                // old and no agent has seen it; a false in a blue_validated column said the same
+                // word here as it did for a hop Blue had examined and rejected, and the dashboard
+                // reported the difference as no difference. HopVerdict keeps the two apart, and
+                // this is the "nobody has looked yet" end of it.
                 TechniqueId = string.Empty,
-                BlueValidated = false,
+                BlueVerdict = HopVerdict.Unassessed,
             });
         }
     }
