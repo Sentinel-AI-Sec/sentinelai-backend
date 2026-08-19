@@ -82,10 +82,15 @@ public sealed class ModelProviderOptions
         new Dictionary<AgentRole, AgentModelOptions>();
 
     /// <summary>
-    /// Per-call network ceiling, applied to the underlying HTTP pipeline. Mirrors
-    /// <c>DebateOptions.RequestTimeout</c>; kept here because the client is built before
-    /// the debate options are in scope.
+    /// Per-call network ceiling, applied to the underlying HTTP pipeline. Without it a
+    /// stalled provider hangs the whole debate with no output and no error, which is
+    /// indistinguishable from the run being slow.
     /// </summary>
+    /// <remarks>
+    /// This is the only request timeout. It lives here rather than on <c>DebateOptions</c>
+    /// because the client is built before the debate options are in scope — a second copy
+    /// over there was bound from configuration and read by nothing.
+    /// </remarks>
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(120);
 
     /// <summary>
@@ -100,10 +105,16 @@ public sealed class ModelProviderOptions
     /// </remarks>
     public int MaxRetries { get; set; } = 3;
 
-    /// <summary>Model id for reasoning-heavy turns.</summary>
+    /// <summary>
+    /// Model id for reasoning-heavy turns. Under <see cref="ModelProvider.AzureOpenAI"/> this
+    /// is the <em>deployment name</em>, not the model name — see <see cref="ModelFor(ModelTier)"/>.
+    /// </summary>
     public string? HighTierModel { get; set; }
 
-    /// <summary>Model id for routine turns.</summary>
+    /// <summary>
+    /// Model id for routine turns. Under <see cref="ModelProvider.AzureOpenAI"/> this is the
+    /// <em>deployment name</em> — see <see cref="ModelFor(ModelTier)"/>.
+    /// </summary>
     public string? CheapTierModel { get; set; }
 
     /// <summary>This agent's overrides, if any were configured.</summary>
@@ -124,7 +135,17 @@ public sealed class ModelProviderOptions
     public IReadOnlyList<AgentRole> AgentsMissingKeys(IEnumerable<AgentRole> required) =>
         [.. required.Where(role => ApiKeyFor(role) is null)];
 
-    /// <summary>Resolves the model id for a tier, falling back to the provider default.</summary>
+    /// <summary>
+    /// Resolves the model id for a tier, falling back to the provider default.
+    /// </summary>
+    /// <remarks>
+    /// For <see cref="ModelProvider.AzureOpenAI"/> the returned string is a <em>deployment
+    /// name</em>. Azure has no way to ask for "gpt-4o" by name: you create a deployment,
+    /// choose its name yourself, and that name goes in the request path. The defaults below
+    /// assume the deployment was named after the model it serves, which is the usual
+    /// convention — if yours is called something else, set <see cref="HighTierModel"/> and
+    /// <see cref="CheapTierModel"/> to the deployment names rather than to model ids.
+    /// </remarks>
     public string ModelFor(ModelTier tier) => tier switch
     {
         ModelTier.High => HighTierModel ?? DefaultHighTier(Provider),

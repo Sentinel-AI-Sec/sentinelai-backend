@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.Configuration;
 using SentinelAI.Application.Debate;
+using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
 using SentinelAI.Agents.Demo;
 using SentinelAI.Infrastructure.Agents.Executors;
@@ -66,7 +67,12 @@ var debateOptions = new DebateOptions { MaxRounds = scenario == Scenario.TurnCap
 
 Banner(scenario, options, debateOptions);
 
-var workflow = DebateWorkflow.Build(new DemoChatClientFactory(options, scenario), debateOptions);
+// SEC-31: rates for whichever provider ended up selected, so the demo closes with a real
+// cost per tier rather than only a transcript. Read after the --provider override, or a run
+// forced onto Azure would be billed at whatever the config file's provider charges.
+var pricing = ProviderPricing.Load(configuration, options.Provider);
+
+var workflow = DebateWorkflow.Build(new DemoChatClientFactory(options, scenario), debateOptions, pricing);
 var runner = new DebateRunner(workflow);
 
 var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -179,21 +185,23 @@ static void PrintAudit(DebateResult result, Scenario scenario)
     Write(audit.TerminatedByTurnCap ? ConsoleColor.Yellow : ConsoleColor.Gray,
         $"  ended by turn-cap : {audit.TerminatedByTurnCap}");
 
-    Write(audit.WeakestJoin == JoinConfidence.Certain ? ConsoleColor.Gray : ConsoleColor.Yellow,
+    Write(audit.WeakestJoin == Confidence.Certain ? ConsoleColor.Gray : ConsoleColor.Yellow,
         $"  weakest join      : {audit.WeakestJoin}");
 
     ConsoleOut.Line($"  checkpoints       : {result.Checkpoints.Count}");
     ConsoleOut.Line();
 
+    PrintCost(audit.Cost);
+
     // AID-01 §3.3 separates these deliberately: an inferred edge is usable but flagged,
     // while only an unresolved edge is surfaced as a potential-chain-unverified.
     switch (audit.WeakestJoin)
     {
-        case JoinConfidence.Unresolved:
+        case Confidence.Unresolved:
             Write(ConsoleColor.Yellow,
                 "  Potential chain, unverified join — surfaced for human confirmation, not a verdict.");
             break;
-        case JoinConfidence.Inferred:
+        case Confidence.Inferred:
             Write(ConsoleColor.Yellow,
                 "  Chain rests on an inferred join — usable, but flagged for extra scrutiny.");
             break;
@@ -204,11 +212,51 @@ static void PrintAudit(DebateResult result, Scenario scenario)
     if (scenario == Scenario.TurnCap && audit.TerminatedByTurnCap)
         Write(ConsoleColor.DarkGray, "  The Reporter still ran and still produced output. That is AC3.");
 
-    if (scenario == Scenario.Unresolved && audit.WeakestJoin == JoinConfidence.Unresolved)
+    if (scenario == Scenario.Unresolved && audit.WeakestJoin == Confidence.Unresolved)
         Write(ConsoleColor.DarkGray,
             "  The chain survived to the Reporter rather than being silently dropped.");
 
     Console.WriteLine();
+}
+
+/// <summary>
+/// SEC-31's cost per audit, by tier. Tokens and money are printed side by side because only
+/// the tokens are certain — the money is those tokens at a rate somebody configured.
+/// </summary>
+static void PrintCost(AuditCost cost)
+{
+    Rule("Cost");
+
+    if (!cost.Measured)
+    {
+        Write(ConsoleColor.DarkGray, "  The provider reported no token usage for this run.");
+        ConsoleOut.Line();
+        return;
+    }
+
+    foreach (var tier in cost.ByTier)
+    {
+        var money = tier.Rated
+            ? $"{tier.Cost:0.000000} {cost.Currency}"
+            : "unpriced";
+
+        ConsoleOut.Line(
+            $"  {tier.Tier,-6}: {tier.Calls} call(s), {tier.Usage.InputTokens} in / "
+            + $"{tier.Usage.OutputTokens} out  →  {money}");
+    }
+
+    Write(cost.FullyRated ? ConsoleColor.Gray : ConsoleColor.Yellow,
+        $"  total : {cost.TotalCalls} call(s), {cost.TotalUsage.TotalTokens} tokens  →  "
+        + $"{cost.Total:0.000000} {cost.Currency}");
+
+    if (!cost.FullyRated)
+    {
+        Write(ConsoleColor.Yellow,
+            "  A tier has no configured rate, so this total is an under-count, not the bill. "
+            + $"Set {ModelPricing.SectionName}:<Tier>:InputPerMillionTokens / OutputPerMillionTokens.");
+    }
+
+    ConsoleOut.Line();
 }
 
 static string Describe(DebateOutcome outcome) => outcome switch

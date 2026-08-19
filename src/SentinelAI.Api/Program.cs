@@ -7,10 +7,13 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services
     .AddApplicationServices()
     .AddInfrastructureServices(builder.Configuration)
-    .AddApiServices();
+    .AddApiServices(builder.Configuration);
 
 var app = builder.Build();
 
 app.UseApiServices();
 
 app.Run();
+
+// Exposed so WebApplicationFactory<Program> can boot this app in tests.
+public partial class Program;

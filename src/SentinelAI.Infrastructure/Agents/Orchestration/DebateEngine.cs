@@ -23,7 +23,8 @@ namespace SentinelAI.Infrastructure.Agents.Orchestration;
 /// </remarks>
 public sealed class DebateEngine(
     IChatClientFactory clients,
-    IOptions<DebateOptions> options) : IDebateEngine
+    IOptions<DebateOptions> options,
+    ModelPricing? pricing = null) : IDebateEngine
 {
     private readonly IChatClientFactory _clients =
         clients ?? throw new ArgumentNullException(nameof(clients));
@@ -31,11 +32,17 @@ public sealed class DebateEngine(
     private readonly DebateOptions _options =
         options?.Value ?? throw new ArgumentNullException(nameof(options));
 
+    /// <summary>
+    /// Token rates for the audit's cost breakdown (SEC-31). Optional so a caller constructing
+    /// the engine directly — the demo, a test — still gets token counts without a price list.
+    /// </summary>
+    private readonly ModelPricing _pricing = pricing ?? ModelPricing.Unpriced;
+
     public async Task<DraftAudit> RunAsync(ScanBrief brief, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(brief);
 
-        var workflow = DebateWorkflow.Build(_clients, _options);
+        var workflow = DebateWorkflow.Build(_clients, _options, _pricing);
         var result = await new DebateRunner(workflow).RunAsync(brief, cancellationToken: ct)
             .ConfigureAwait(false);
 
@@ -46,6 +53,10 @@ public sealed class DebateEngine(
             ?? throw new InvalidOperationException(
                 $"Debate for scan '{brief.ScanJobId}' ended without an audit. "
                 + $"{result.Turns.Count} turn(s) completed; "
-                + $"{result.Checkpoints.Count} checkpoint(s) available for resume.");
+                + $"{result.Checkpoints.Count} checkpoint(s) available for resume."
+                + (result.Failures.Count > 0
+                    ? $" Failure(s) reported by the workflow: {string.Join(" | ", result.Failures)}"
+                    : " No failure event was reported by the workflow itself — check the model "
+                      + "provider's own connectivity/rate-limit status directly."));
     }
 }

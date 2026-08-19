@@ -20,13 +20,22 @@ namespace SentinelAI.Infrastructure.Agents.Executors;
 /// so the Reporter — which emits a <c>DraftAudit</c> rather than another turn — closes
 /// the generic differently from Red and Blue.
 /// </typeparam>
-public abstract class DebateExecutor<TOutput>(string id, AIAgent agent, AgentRole role)
+/// <param name="tier">
+/// The model tier this executor's client was built for (SEC-31). Passed in rather than looked
+/// up, because the executor must not know how a tier resolves to a vendor or a model id — it
+/// only records which class of model answered.
+/// </param>
+public abstract class DebateExecutor<TOutput>(
+    string id, AIAgent agent, AgentRole role, ModelTier tier = ModelTier.High)
     : Executor<DebateTurn, TOutput>(id)
 {
     private readonly AIAgent _agent = agent ?? throw new ArgumentNullException(nameof(agent));
 
     /// <summary>Which role this executor plays in the debate.</summary>
     protected AgentRole Role { get; } = role;
+
+    /// <summary>Which model tier serves this executor's turns.</summary>
+    protected ModelTier Tier { get; } = tier;
 
     /// <summary>Builds the prompt handed to the model from the incoming turn and transcript.</summary>
     protected abstract string BuildPrompt(DebateTurn incoming, DebateState state);
@@ -46,10 +55,34 @@ public abstract class DebateExecutor<TOutput>(string id, AIAgent agent, AgentRol
             .RunAsync(BuildPrompt(message, state), cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
-        var turn = Interpret(response.Text ?? string.Empty, message, state);
+        // Stamped here rather than in each Interpret override, so a new agent cannot be added
+        // that quietly spends tokens nobody counts. SEC-31's cost figure is a fold over the
+        // turns, and a turn without its tier and usage is a hole in it.
+        var turn = Interpret(response.Text ?? string.Empty, message, state) with
+        {
+            Tier = Tier,
+            Usage = UsageOf(response)
+        };
 
         await WriteStateAsync(context, state.Append(turn), turn, cancellationToken).ConfigureAwait(false);
         return turn;
+    }
+
+    /// <summary>
+    /// Tokens the provider billed for one call, or <see cref="TokenUsage.None"/>.
+    /// </summary>
+    /// <remarks>
+    /// Usage is optional on the wire and several providers omit it, so a missing count is
+    /// normal and must not fail the turn. It is recorded as zero and the audit distinguishes
+    /// that case: <c>AuditCost.Measured</c> is false when nothing was reported, so an
+    /// unmeasured debate never reads as a cheap one.
+    /// </remarks>
+    internal static TokenUsage UsageOf(AgentResponse response)
+    {
+        var usage = response?.Usage;
+        if (usage is null) return TokenUsage.None;
+
+        return new TokenUsage(usage.InputTokenCount ?? 0, usage.OutputTokenCount ?? 0);
     }
 
     /// <summary>
@@ -104,8 +137,9 @@ public abstract class DebateExecutor<TOutput>(string id, AIAgent agent, AgentRol
 /// <summary>
 /// A debate agent that hands its turn to the next agent along the graph — Red and Blue.
 /// </summary>
-public abstract class DebateExecutor(string id, AIAgent agent, AgentRole role)
-    : DebateExecutor<DebateTurn>(id, agent, role)
+public abstract class DebateExecutor(
+    string id, AIAgent agent, AgentRole role, ModelTier tier = ModelTier.High)
+    : DebateExecutor<DebateTurn>(id, agent, role, tier)
 {
     public override ValueTask<DebateTurn> HandleAsync(
         DebateTurn message,

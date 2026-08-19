@@ -28,15 +28,30 @@ public sealed class OrchestratorExecutor : Executor<ScanBrief, DebateTurn>
         """;
 
     private readonly AIAgent? _agent;
+    private readonly ModelTier _tier;
 
     /// <summary>Creates a model-backed orchestrator that analyses the brief via NIM.</summary>
-    public OrchestratorExecutor(AIAgent agent) : base(ExecutorId)
-        => _agent = agent ?? throw new ArgumentNullException(nameof(agent));
+    /// <param name="agent">The backing agent.</param>
+    /// <param name="tier">
+    /// The tier serving it — <see cref="ModelTier.Cheap"/> under the shipped policy, since
+    /// briefing is the routine turn SEC-31 routes away from the reasoning model. Recorded on
+    /// the seed turn so the audit's cost breakdown can charge it to the right tier.
+    /// </param>
+    public OrchestratorExecutor(AIAgent agent, ModelTier tier = ModelTier.Cheap) : base(ExecutorId)
+    {
+        _agent = agent ?? throw new ArgumentNullException(nameof(agent));
+        _tier = tier;
+    }
 
     /// <summary>
-    /// Creates a pass-through orchestrator with no model call. Used by the Scripted
-    /// provider and by tests — the raw context is forwarded as the seed turn.
+    /// Creates a pass-through orchestrator with no model call — the raw context is
+    /// forwarded as the seed turn.
     /// </summary>
+    /// <remarks>
+    /// Tests only. Every provider, Scripted included, goes through
+    /// <c>DebateWorkflow.CreateAgent</c> and gets the model-backed constructor above; the
+    /// Scripted provider swaps the <c>IChatClient</c>, not the executor.
+    /// </remarks>
     public OrchestratorExecutor() : base(ExecutorId) { }
 
     public override async ValueTask<DebateTurn> HandleAsync(
@@ -47,6 +62,8 @@ public sealed class OrchestratorExecutor : Executor<ScanBrief, DebateTurn>
         // When a model is available, let it analyse the resource graph and produce a
         // strategic briefing. Otherwise pass the raw context through unchanged.
         var content = message.Context;
+        var usage = TokenUsage.None;
+
         if (_agent is not null)
         {
             var prompt = $"Briefing for Red Team:\n{message.Context}";
@@ -54,21 +71,34 @@ public sealed class OrchestratorExecutor : Executor<ScanBrief, DebateTurn>
                 .RunAsync(prompt, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             content = response.Text ?? content;
+            usage = DebateExecutor<DebateTurn>.UsageOf(response);
         }
 
         var seed = new DebateTurn
         {
             Role = AgentRole.Orchestrator, // round 0 carries the brief, not an assertion
             Round = 0,
-            Content = content
+            Content = content,
+            Tier = _tier,
+            Usage = usage
         };
 
         // Round 0 seeds the state but is not itself a debate turn, so the transcript
-        // starts empty and TurnCount counts only real agent turns.
+        // starts empty and TurnCount counts only real agent turns. The seed is still kept
+        // on the state — off to one side — because when the Orchestrator is model-backed it
+        // is a billed call, and SEC-31's cost per audit is short by one without it.
+        //
+        // The pass-through orchestrator stores nothing: it made no model call, and a seed
+        // recorded there would show up in the cost breakdown as a call that never happened.
         await context
             .QueueStateUpdateAsync(
                 DebateStateKeys.State,
-                new DebateState { Round = 0, ResourceGraph = message.Context },
+                new DebateState
+                {
+                    Round = 0,
+                    ResourceGraph = message.Context,
+                    Seed = _agent is null ? null : seed
+                },
                 DebateStateKeys.SharedScope,
                 cancellationToken)
             .ConfigureAwait(false);

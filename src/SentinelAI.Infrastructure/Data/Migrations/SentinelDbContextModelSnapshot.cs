@@ -17,7 +17,7 @@ namespace SentinelAI.Infrastructure.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.10")
+                .HasAnnotation("ProductVersion", "10.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -45,9 +45,14 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ScanJobId");
+
+                    b.HasIndex("TenantId");
 
                     b.ToTable("Chains");
                 });
@@ -58,8 +63,9 @@ namespace SentinelAI.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<bool>("BlueValidated")
-                        .HasColumnType("bit");
+                    b.Property<string>("BlueVerdict")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("ChainId")
                         .HasColumnType("uniqueidentifier");
@@ -67,7 +73,7 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.Property<Guid?>("EdgeId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("FindingId")
+                    b.Property<Guid?>("FindingId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("HopOrder")
@@ -77,6 +83,9 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ChainId");
@@ -84,6 +93,8 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.HasIndex("EdgeId");
 
                     b.HasIndex("FindingId");
+
+                    b.HasIndex("TenantId");
 
                     b.ToTable("ChainHops");
                 });
@@ -112,11 +123,16 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ChainHopId");
 
                     b.HasIndex("ReportId");
+
+                    b.HasIndex("TenantId");
 
                     b.ToTable("Citations");
                 });
@@ -158,9 +174,14 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ScanJobId");
+
+                    b.HasIndex("TenantId");
 
                     b.ToTable("Findings");
                 });
@@ -192,6 +213,9 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("ToNodeId")
                         .HasColumnType("uniqueidentifier");
 
@@ -200,6 +224,8 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.HasIndex("FromNodeId");
 
                     b.HasIndex("ScanJobId");
+
+                    b.HasIndex("TenantId");
 
                     b.HasIndex("ToNodeId");
 
@@ -233,7 +259,12 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.Property<Guid>("ScanJobId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
 
                     b.HasIndex("ScanJobId", "NodeKey")
                         .IsUnique();
@@ -249,14 +280,17 @@ namespace SentinelAI.Infrastructure.Migrations
 
                     b.Property<string>("DefaultBranch")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
 
                     b.Property<string>("GithubInstallationId")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("RepoUrl")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -265,7 +299,47 @@ namespace SentinelAI.Infrastructure.Migrations
 
                     b.HasIndex("TenantId");
 
+                    b.HasIndex("TenantId", "RepoUrl")
+                        .IsUnique();
+
                     b.ToTable("Projects");
+                });
+
+            modelBuilder.Entity("SentinelAI.Domain.Models.RefreshToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("RefreshTokens");
                 });
 
             modelBuilder.Entity("SentinelAI.Domain.Models.Report", b =>
@@ -273,6 +347,24 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("CheapTierCost")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<long>("CheapTierInputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("CheapTierOutputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("CostCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<bool>("CostRated")
+                        .HasColumnType("bit");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -284,6 +376,19 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<decimal>("HighTierCost")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<long>("HighTierInputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("HighTierOutputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("ModelCalls")
+                        .HasColumnType("int");
+
                     b.Property<bool>("Retained")
                         .HasColumnType("bit");
 
@@ -294,10 +399,15 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ScanJobId")
                         .IsUnique();
+
+                    b.HasIndex("TenantId");
 
                     b.ToTable("Reports");
                 });
@@ -338,16 +448,400 @@ namespace SentinelAI.Infrastructure.Migrations
                             Id = new Guid("f099c288-0f0c-43f1-b956-f6a6233ba3eb"),
                             CheckId = "SCS0028",
                             CweId = "CWE-502",
-                            Notes = "Baseline exact lookup map",
+                            Notes = "Security Code Scan: unsafe deserialization",
                             SourceTool = "roslyn"
                         },
                         new
                         {
-                            Id = new Guid("b882650b-47e1-4c07-ba96-7fc3b8a13a21"),
-                            CheckId = "CKV_AWS_20",
-                            CweId = "CWE-284",
-                            Notes = "Baseline exact lookup map",
+                            Id = new Guid("20d42173-70fa-4d33-acde-0fca5d4acb42"),
+                            CheckId = "SCS0001",
+                            CweId = "CWE-78",
+                            Notes = "Security Code Scan: OS command injection",
+                            SourceTool = "roslyn"
+                        },
+                        new
+                        {
+                            Id = new Guid("6b1f0a4c-1d2e-4a3b-9c5d-2e7f8a9b0c11"),
+                            CheckId = "SCS0002",
+                            CweId = "CWE-89",
+                            Notes = "Security Code Scan: SQL injection",
+                            SourceTool = "roslyn"
+                        },
+                        new
+                        {
+                            Id = new Guid("dd4f560a-16cc-462e-91d3-da21cf70de3e"),
+                            CheckId = "SCS0005",
+                            CweId = "CWE-338",
+                            Notes = "Security Code Scan: weak random number generator",
+                            SourceTool = "roslyn"
+                        },
+                        new
+                        {
+                            Id = new Guid("7c2a1b5d-3e4f-4b6a-8d9e-1f2a3b4c5d22"),
+                            CheckId = "SCS0006",
+                            CweId = "CWE-328",
+                            Notes = "Security Code Scan: weak hashing function",
+                            SourceTool = "roslyn"
+                        },
+                        new
+                        {
+                            Id = new Guid("8d3b2c6e-4f5a-4c7b-9e0f-2a3b4c5d6e33"),
+                            CheckId = "SCS0007",
+                            CweId = "CWE-611",
+                            Notes = "Security Code Scan: XML external entity (XXE)",
+                            SourceTool = "roslyn"
+                        },
+                        new
+                        {
+                            Id = new Guid("7853dced-5fc7-4263-b765-8d0b2d72636e"),
+                            CheckId = "SCS0018",
+                            CweId = "CWE-22",
+                            Notes = "Security Code Scan: path traversal",
+                            SourceTool = "roslyn"
+                        },
+                        new
+                        {
+                            Id = new Guid("b827ed21-2d56-47bd-a7c2-b9e0153d9cfc"),
+                            CheckId = "SCS0026",
+                            CweId = "CWE-90",
+                            Notes = "Security Code Scan: LDAP injection",
+                            SourceTool = "roslyn"
+                        },
+                        new
+                        {
+                            Id = new Guid("29eea3df-8e2d-4e22-8d75-a85bfa5683d3"),
+                            CheckId = "SCS0029",
+                            CweId = "CWE-79",
+                            Notes = "Security Code Scan: cross-site scripting",
+                            SourceTool = "roslyn"
+                        },
+                        new
+                        {
+                            Id = new Guid("9e4c3d7f-5a6b-4d8c-af10-3b4c5d6e7f44"),
+                            CheckId = "SCS0004",
+                            CweId = "CWE-295",
+                            Notes = "Security Code Scan: certificate validation disabled",
+                            SourceTool = "roslyn"
+                        },
+                        new
+                        {
+                            Id = new Guid("af5d4e80-6b7c-4e9d-b021-4c5d6e7f8a55"),
+                            CheckId = "SCS0010",
+                            CweId = "CWE-327",
+                            Notes = "Security Code Scan: weak cipher algorithm",
+                            SourceTool = "roslyn"
+                        },
+                        new
+                        {
+                            Id = new Guid("b06e5f91-7c8d-4fae-c132-5d6e7f8a9b66"),
+                            CheckId = "SCS0012",
+                            CweId = "CWE-862",
+                            Notes = "Security Code Scan: authorization bypass",
+                            SourceTool = "roslyn"
+                        },
+                        new
+                        {
+                            Id = new Guid("c17f6a02-8d9e-40bf-d243-6e7f8a9b0c77"),
+                            CheckId = "SCS0015",
+                            CweId = "CWE-798",
+                            Notes = "Security Code Scan: hardcoded credential",
+                            SourceTool = "roslyn"
+                        },
+                        new
+                        {
+                            Id = new Guid("d2807b13-9eaf-41c0-e354-7f8a9b0c1d88"),
+                            CheckId = "SCS0016",
+                            CweId = "CWE-352",
+                            Notes = "Security Code Scan: cross-site request forgery",
+                            SourceTool = "roslyn"
+                        },
+                        new
+                        {
+                            Id = new Guid("12f18d7c-e69e-4cde-9a0f-b12ddd332647"),
+                            CheckId = "CKV_AWS_288",
+                            CweId = "CWE-732",
+                            Notes = "Checkov policy: IAM policy allows data exfiltration",
                             SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("f4a29d35-b0c1-43e2-a576-9b0c1d2e3f00"),
+                            CheckId = "CKV_AWS_289",
+                            CweId = "CWE-732",
+                            Notes = "Checkov policy: IAM policy allows permissions management",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("05b3ae46-c1d2-44f3-b687-ac1d2e3f4011"),
+                            CheckId = "CKV_AWS_290",
+                            CweId = "CWE-732",
+                            Notes = "Checkov policy: IAM policy allows unconstrained write",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("16c4bf57-d2e3-4504-c798-bd2e3f405122"),
+                            CheckId = "CKV_AWS_355",
+                            CweId = "CWE-732",
+                            Notes = "Checkov policy: IAM policy uses \"*\" as a resource",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("27d5c068-e3f4-4615-d8a9-ce3f40516233"),
+                            CheckId = "CKV_AWS_53",
+                            CweId = "CWE-284",
+                            Notes = "Checkov policy: S3 block public ACLs disabled",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("38e6d179-f405-4726-e9ba-df4051627344"),
+                            CheckId = "CKV_AWS_54",
+                            CweId = "CWE-284",
+                            Notes = "Checkov policy: S3 block public policy disabled",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("49f7e28a-0516-4837-facb-e05162738455"),
+                            CheckId = "CKV_AWS_55",
+                            CweId = "CWE-284",
+                            Notes = "Checkov policy: S3 ignore public ACLs disabled",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("5a08f39b-1627-4948-0bdc-f16273849566"),
+                            CheckId = "CKV_AWS_56",
+                            CweId = "CWE-284",
+                            Notes = "Checkov policy: S3 restrict_public_buckets disabled",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("6b1904ac-2738-4a59-1ced-027384950677"),
+                            CheckId = "CKV2_AWS_6",
+                            CweId = "CWE-284",
+                            Notes = "Checkov policy: S3 bucket has no public access block",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("1b276ae3-0480-42a5-8449-a79a0ab218ab"),
+                            CheckId = "CKV_AWS_18",
+                            CweId = "CWE-778",
+                            Notes = "Checkov policy: S3 access logging not enabled",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("7c2a15bd-3849-4b6a-2dfe-138495061788"),
+                            CheckId = "CKV_AWS_145",
+                            CweId = "CWE-311",
+                            Notes = "Checkov policy: S3 not encrypted with KMS",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("8d3b26ce-494a-4c7b-3e0f-249506172899"),
+                            CheckId = "CKV_AWS_21",
+                            CweId = "CWE-693",
+                            Notes = "Checkov policy: S3 versioning disabled",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("9e4c37df-5a5b-4d8c-4f10-35061728399a"),
+                            CheckId = "CKV_AWS_144",
+                            CweId = "CWE-693",
+                            Notes = "Checkov policy: S3 cross-region replication disabled",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("af5d48e0-6b6c-4e9d-5021-4617283949ab"),
+                            CheckId = "CKV2_AWS_61",
+                            CweId = "CWE-693",
+                            Notes = "Checkov policy: S3 has no lifecycle configuration",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("9299d45f-8be7-407f-8569-6cfc77d22943"),
+                            CheckId = "CKV2_AWS_62",
+                            CweId = "CWE-778",
+                            Notes = "Checkov policy: S3 event notifications disabled",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("dcf54bae-4eba-42f2-891a-06d3a3ed9b60"),
+                            CheckId = "CKV_AWS_23",
+                            CweId = "CWE-1059",
+                            Notes = "Checkov policy: security group rule has no description",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("ea1979fc-cd3b-48c7-8dbe-16923dfc13db"),
+                            CheckId = "CKV_AWS_249",
+                            CweId = "CWE-250",
+                            Notes = "Checkov policy: ECS execution and task roles are the same",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("e3918c24-afa0-42d1-9465-8a5abcdef012"),
+                            CheckId = "CKV_AWS_333",
+                            CweId = "CWE-1327",
+                            Notes = "Checkov policy: ECS service assigned a public IP",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("f4a29d35-b0b1-43e2-a576-9babcdef0123"),
+                            CheckId = "CKV_AWS_336",
+                            CweId = "CWE-732",
+                            Notes = "Checkov policy: ECS container root filesystem is writable",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("eef61ee4-2167-4f09-873a-8e30c5250145"),
+                            CheckId = "CKV_DOCKER_3",
+                            CweId = "CWE-250",
+                            Notes = "Checkov policy: container has no non-root user",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("05b3ae46-c1c2-44f3-b687-acbcdef01234"),
+                            CheckId = "CKV_DOCKER_2",
+                            CweId = "CWE-693",
+                            Notes = "Checkov policy: image has no HEALTHCHECK",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("16c4bf57-d2d3-4504-c798-bdcdef012345"),
+                            CheckId = "CKV_SECRET_6",
+                            CweId = "CWE-798",
+                            Notes = "Checkov policy: hardcoded secret in the image",
+                            SourceTool = "checkov"
+                        },
+                        new
+                        {
+                            Id = new Guid("d62d3bff-5cea-408e-83b4-1a73c83b834d"),
+                            CheckId = "AWS-0086",
+                            CweId = "CWE-284",
+                            Notes = "Trivy AVD misconfiguration: S3 public access block missing",
+                            SourceTool = "trivy"
+                        },
+                        new
+                        {
+                            Id = new Guid("27d5c068-e3e4-4615-d8a9-cedef0123456"),
+                            CheckId = "AWS-0087",
+                            CweId = "CWE-284",
+                            Notes = "Trivy AVD misconfiguration: S3 block public ACLs disabled",
+                            SourceTool = "trivy"
+                        },
+                        new
+                        {
+                            Id = new Guid("1daf0baa-6a14-4f71-9dda-9841409f10ee"),
+                            CheckId = "AWS-0089",
+                            CweId = "CWE-778",
+                            Notes = "Trivy AVD misconfiguration: S3 bucket access logging disabled",
+                            SourceTool = "trivy"
+                        },
+                        new
+                        {
+                            Id = new Guid("38e6d179-f4f5-4726-e9ba-dfef01234567"),
+                            CheckId = "AWS-0090",
+                            CweId = "CWE-693",
+                            Notes = "Trivy AVD misconfiguration: S3 versioning disabled",
+                            SourceTool = "trivy"
+                        },
+                        new
+                        {
+                            Id = new Guid("49f7e28a-0506-4837-facb-e0f012345678"),
+                            CheckId = "AWS-0091",
+                            CweId = "CWE-284",
+                            Notes = "Trivy AVD misconfiguration: S3 block public policy disabled",
+                            SourceTool = "trivy"
+                        },
+                        new
+                        {
+                            Id = new Guid("5a08f39b-1617-4948-0bdc-f10123456789"),
+                            CheckId = "AWS-0093",
+                            CweId = "CWE-284",
+                            Notes = "Trivy AVD misconfiguration: S3 restrict public buckets disabled",
+                            SourceTool = "trivy"
+                        },
+                        new
+                        {
+                            Id = new Guid("6b1904ac-2728-4a59-1ced-02123456789a"),
+                            CheckId = "AWS-0094",
+                            CweId = "CWE-284",
+                            Notes = "Trivy AVD misconfiguration: S3 bucket has a public ACL",
+                            SourceTool = "trivy"
+                        },
+                        new
+                        {
+                            Id = new Guid("7c2a15bd-3839-4b6a-2dfe-1323456789ab"),
+                            CheckId = "AWS-0104",
+                            CweId = "CWE-284",
+                            Notes = "Trivy AVD misconfiguration: security group allows unrestricted egress",
+                            SourceTool = "trivy"
+                        },
+                        new
+                        {
+                            Id = new Guid("8d3b26ce-493a-4c7b-3e0f-2423456789bc"),
+                            CheckId = "AWS-0124",
+                            CweId = "CWE-1059",
+                            Notes = "Trivy AVD misconfiguration: security group rule has no description",
+                            SourceTool = "trivy"
+                        },
+                        new
+                        {
+                            Id = new Guid("9e4c37df-5a4b-4d8c-4f10-353456789bcd"),
+                            CheckId = "AWS-0132",
+                            CweId = "CWE-311",
+                            Notes = "Trivy AVD misconfiguration: S3 not encrypted with a customer-managed key",
+                            SourceTool = "trivy"
+                        },
+                        new
+                        {
+                            Id = new Guid("af5d48e0-6b5c-4e9d-5021-46456789bcde"),
+                            CheckId = "AWS-0345",
+                            CweId = "CWE-1327",
+                            Notes = "Trivy AVD misconfiguration: ECS service assigned a public IP",
+                            SourceTool = "trivy"
+                        },
+                        new
+                        {
+                            Id = new Guid("b06e59f1-7c6d-4fae-6132-5756789bcdef"),
+                            CheckId = "DS-0002",
+                            CweId = "CWE-250",
+                            Notes = "Trivy AVD misconfiguration: container runs as root",
+                            SourceTool = "trivy"
+                        },
+                        new
+                        {
+                            Id = new Guid("c17f6a02-8d7e-40bf-7243-68789bcdef01"),
+                            CheckId = "DS-0026",
+                            CweId = "CWE-693",
+                            Notes = "Trivy AVD misconfiguration: image has no HEALTHCHECK",
+                            SourceTool = "trivy"
+                        },
+                        new
+                        {
+                            Id = new Guid("b7c1f622-1689-4892-bb30-00e6aa54bb8b"),
+                            CheckId = "DS-0031",
+                            CweId = "CWE-798",
+                            Notes = "Trivy AVD misconfiguration: secret exposed in an image layer",
+                            SourceTool = "trivy"
                         });
                 });
 
@@ -378,10 +872,26 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("StorageLocator")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ScanJobId")
                         .IsUnique();
+
+                    b.HasIndex("TenantId");
 
                     b.ToTable("ScanBundles");
                 });
@@ -406,6 +916,13 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("FailureReason")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ModelTierHint")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("PrRef")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -413,12 +930,22 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("RetainReport")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Stage")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("TriggeredBy")
                         .HasColumnType("uniqueidentifier");
@@ -429,6 +956,8 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ProjectId");
+
+                    b.HasIndex("TenantId");
 
                     b.HasIndex("TriggeringUserId");
 
@@ -468,6 +997,13 @@ namespace SentinelAI.Infrastructure.Migrations
 
                     b.Property<string>("Email")
                         .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<bool>("IsEmailVerified")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Role")
@@ -478,6 +1014,9 @@ namespace SentinelAI.Infrastructure.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Email")
+                        .IsUnique();
 
                     b.HasIndex("TenantId");
 
@@ -511,8 +1050,7 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.HasOne("SentinelAI.Domain.Models.Finding", "Finding")
                         .WithMany("ChainHops")
                         .HasForeignKey("FindingId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Chain");
 
@@ -594,6 +1132,17 @@ namespace SentinelAI.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("SentinelAI.Domain.Models.RefreshToken", b =>
+                {
+                    b.HasOne("SentinelAI.Domain.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("SentinelAI.Domain.Models.Report", b =>

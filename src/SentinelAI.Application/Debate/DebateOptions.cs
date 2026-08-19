@@ -17,16 +17,40 @@ public sealed class DebateOptions
     public int MaxRounds { get; set; } = 3;
 
     /// <summary>
-    /// Model tier per role (AID-01 2.1). All three are reasoning-heavy turns by default;
-    /// the cheap tier exists for routine formatting work added later.
+    /// The SEC-31 routing policy: which tier each role's turn is worth (AID-01 2.1).
     /// </summary>
-    public IDictionary<AgentRole, ModelTier> Tiers { get; } = new Dictionary<AgentRole, ModelTier>
-    {
-        [AgentRole.Orchestrator] = ModelTier.Cheap,
-        [AgentRole.Red] = ModelTier.High,
-        [AgentRole.Blue] = ModelTier.High,
-        [AgentRole.Reporter] = ModelTier.High
-    };
+    /// <remarks>
+    /// <para>
+    /// The split follows the three reasoning-heavy turns AID-01 names — chaining (Red),
+    /// link validation (Blue), and adjudication (Reporter) — against the one routine turn.
+    /// The Orchestrator neither asserts nor rebuts: it reads the graph and writes a short
+    /// briefing, which is the "high-volume routine" work the cheap tier exists for.
+    /// </para>
+    /// <para>
+    /// Overridable per role from <c>SentinelAI:Debate:Tiers</c>, because a demo may want
+    /// everything cheap and a benchmark may want everything high. What is not overridable is
+    /// that the choice is recorded: whatever this map says, the tier that actually served a
+    /// turn is stamped on that turn and shows up in the audit's cost breakdown.
+    /// </para>
+    /// </remarks>
+    public IDictionary<AgentRole, ModelTier> Tiers { get; } =
+        new Dictionary<AgentRole, ModelTier>(DefaultTiers);
+
+    /// <summary>
+    /// The shipped routing policy, separate from the mutable instance so a test can assert
+    /// the default without reading it back off an options object something may have edited.
+    /// </summary>
+    public static IReadOnlyDictionary<AgentRole, ModelTier> DefaultTiers { get; } =
+        new Dictionary<AgentRole, ModelTier>
+        {
+            // Routine: briefs Red from the graph, asserts nothing.
+            [AgentRole.Orchestrator] = ModelTier.Cheap,
+
+            // Reasoning-heavy: chaining, link validation, adjudication.
+            [AgentRole.Red] = ModelTier.High,
+            [AgentRole.Blue] = ModelTier.High,
+            [AgentRole.Reporter] = ModelTier.High
+        };
 
     /// <summary>
     /// Ceiling on tokens per agent turn. Latency scales with tokens generated, and a
@@ -48,14 +72,25 @@ public sealed class DebateOptions
     /// </summary>
     public float Temperature { get; set; } = 0.2f;
 
-    /// <summary>
-    /// Per-call ceiling. Without it a stalled provider hangs the whole debate with no
-    /// output and no error, which is indistinguishable from the run being slow.
-    /// </summary>
-    public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(120);
+    // There is deliberately no RequestTimeout here. The per-call ceiling is applied to the
+    // HTTP pipeline when the client is built, which happens before these options are in
+    // scope, so it lives on ModelProviderOptions (SentinelAI:Models:RequestTimeout). A copy
+    // on this type was bound from SentinelAI:Debate and read by nothing — setting it looked
+    // like it worked and changed no behaviour.
 
+    /// <summary>
+    /// The tier that will serve this role's turns.
+    /// </summary>
+    /// <remarks>
+    /// Falls back to the shipped default rather than to <see cref="ModelTier.High"/>. The old
+    /// blanket fallback made every unmapped role expensive, so a role dropped from the map —
+    /// which configuration can do, since binding replaces entries — silently moved the
+    /// Orchestrator's routine briefing onto the reasoning model and nothing said so.
+    /// </remarks>
     public ModelTier TierFor(AgentRole role) =>
-        Tiers.TryGetValue(role, out var tier) ? tier : ModelTier.High;
+        Tiers.TryGetValue(role, out var tier) ? tier
+        : DefaultTiers.TryGetValue(role, out var shipped) ? shipped
+        : ModelTier.High;
 
     /// <summary>
     /// Throws if the configured policy could never terminate correctly. Public because

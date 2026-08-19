@@ -17,6 +17,13 @@ public sealed record DebateResult
     /// <summary>Checkpoints written during this run, oldest first.</summary>
     public required IReadOnlyList<CheckpointInfo> Checkpoints { get; init; }
 
+    /// <summary>
+    /// Executor and workflow failures the framework reported during this run — a bad key, a
+    /// network error, a rate limit — captured so a run that ends without an audit says why
+    /// rather than just how far it got. Empty on a clean run.
+    /// </summary>
+    public required IReadOnlyList<string> Failures { get; init; }
+
     /// <summary>The session the run belongs to. Needed to resume it.</summary>
     public required string SessionId { get; init; }
 
@@ -103,6 +110,7 @@ public sealed class DebateRunner(Workflow workflow, CheckpointManager? checkpoin
     {
         DraftAudit? audit = null;
         var turns = new List<DebateTurn>();
+        var failures = new List<string>();
 
         await foreach (var evt in run.WatchStreamAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -114,6 +122,19 @@ public sealed class DebateRunner(Workflow workflow, CheckpointManager? checkpoin
                 case WorkflowOutputEvent { Data: DraftAudit produced }:
                     audit = produced;
                     break;
+
+                // The framework reports an executor exception (a bad key, a network error, a
+                // rate limit) as an event in this stream, not as a .NET exception thrown out of
+                // WatchStreamAsync. Before this case existed, that exception was silently
+                // dropped: the caller only ever saw "0 turns completed" with no indication a
+                // model call had failed at all — the actual error, and everything about it, was
+                // discarded here.
+                case ExecutorFailedEvent failed:
+                    failures.Add($"executor '{failed.ExecutorId}' failed: {failed.Data}");
+                    break;
+                case WorkflowErrorEvent error:
+                    failures.Add($"workflow error: {error.Exception}");
+                    break;
             }
 
             onEvent?.Invoke(evt);
@@ -123,6 +144,7 @@ public sealed class DebateRunner(Workflow workflow, CheckpointManager? checkpoin
         {
             Audit = audit,
             Turns = turns,
+            Failures = failures,
             Checkpoints = run.Checkpoints,
             SessionId = run.SessionId
         };

@@ -1,0 +1,306 @@
+name: CI
+
+# The whole test suite runs against the Scripted provider, so CI needs no API key, no
+# network access to a model, and spends no tokens. Any job here that suddenly needs a
+# secret means something has been wired to a live provider by mistake.
+#
+# No database either: the migrations job compares the EF model to the snapshot on disk and
+# never contacts a server.
+
+on:
+  push:
+    branches: [main, master, dev, develop]
+  pull_request:
+  workflow_dispatch:
+
+# Nothing here writes to the repository — no comment posting, no release, no push. The secrets
+# job in particular only reads the checkout.
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  # Belt and braces: even if a committed appsettings names a live provider, CI stays offline.
+  SentinelAI__Models__Provider: Scripted
+
+jobs:
+  build:
+    name: Build & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore SentinelAI.slnx
+
+      - name: Build
+        run: dotnet build SentinelAI.slnx --no-restore --configuration Release
+
+      - name: Test
+        run: >
+          dotnet test SentinelAI.slnx
+          --no-build
+          --configuration Release
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/*.trx
+          if-no-files-found: ignore
+
+      - name: Smoke-run the offline demo
+        # Proves the sample still runs end to end. Scripted provider, so it is deterministic
+        # and free — a broken demo should fail CI, not the sprint review.
+        run: >
+          dotnet run --project samples/SentinelAI.Agents.Demo
+          --configuration Release --no-build -- debate
+
+  migrations:
+    name: EF model matches migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore
+        # Not optional, and not implied by the ef command below. `dotnet ef` reads the project
+        # through MSBuild, and MSBuild cannot evaluate a project that has no
+        # obj/project.assets.json — so the job died at NETSDK1004 before it ever loaded the
+        # model. The message it prints, "Unable to retrieve project metadata. Ensure it's an
+        # SDK-style project", reads like a malformed csproj rather than a missing restore, which
+        # is why this was worth a comment.
+        run: dotnet restore SentinelAI.slnx
+
+      - name: Install EF tools
+        # Pinned to the EF Core major the projects reference (10.0.x). The global tool is
+        # resolved at install time, so an unpinned install silently follows the newest release
+        # and starts failing against this runtime on the next major.
+        run: dotnet tool install --global dotnet-ef --version 10.0.*
+
+      - name: Fail if the model drifted from the last migration
+        # Catches an entity change merged without its migration, which otherwise surfaces as
+        # a runtime column-not-found in whoever's environment updates first.
+        run: >
+          dotnet ef migrations has-pending-model-changes
+          --project src/SentinelAI.Infrastructure
+          --startup-project src/SentinelAI.Api
+
+  secrets:
+    name: Secret hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail if a local secrets file was committed
+        # appsettings.Development.json holds one live API key per agent. .gitignore covers
+        # it, but a `git add -f` or a rename slips past that, and a leaked key is not
+        # recoverable by reverting the commit.
+        run: |
+          matches=$(git ls-files \
+            | grep -E '(^|/)(dev\.json|dev\..*\.json|secrets\.json|appsettings\.(Development|Local)\.json)$' \
+            | grep -v 'example' || true)
+          if [ -n "$matches" ]; then
+            echo "::error::Committed secrets file(s):"
+            echo "$matches"
+            exit 1
+          fi
+          echo "No secrets files tracked."
+
+      - name: Fail if an API key literal was committed
+        # Provider key prefixes: nvapi- (NVIDIA NIM), sk-ant- (Anthropic), sk- (OpenAI).
+        run: |
+          hits=$(git grep -nIE '(nvapi-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,})' \
+                 -- . ':(exclude).github/workflows/*' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Possible API key committed:"
+            echo "$hits"
+            exit 1
+          fi
+          echo "No API key literals found."
+
+      - name: Fail if a connection-string password was committed
+        # Two exclusions, both deliberate — without them this step is permanently red and
+        # therefore ignored, which is worse than not having it.
+        #
+        #   RegexSecretScannerTests owns fake credentials by design: they are the fixtures that
+        #   prove the ingress redaction gate catches this exact pattern. Excluding the file is
+        #   narrower than loosening the pattern everything else is checked with.
+        #
+        #   `Password=<pw>` / `${DB_PASSWORD}` / `Password=***` are documentation placeholders.
+        #   A value that names itself as a value to be filled in is not a leaked one.
+        run: |
+          hits=$(git grep -nIE '(Password|pwd)=[^;"[:space:]]+' \
+                 -- '*.json' '*.cs' '*.yaml' '*.yml' \
+                 ':(exclude).github/workflows/*' \
+                 ':(exclude)tests/SentinelAI.Infrastructure.Tests/Security/RegexSecretScannerTests.cs' \
+                 | grep -viE '(Password|pwd)=(<[^>]*>|\$\{[^}]*\}|%[^%]*%|\*+|your[_-]|change[_-]?me)' \
+                 || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Possible connection-string password committed:"
+            echo "$hits"
+            exit 1
+          fi
+          echo "No connection-string passwords found."
+
+  # ---------------------------------------------------------------------------------------
+  # Publish to Azure Container Apps.
+  #
+  # Deliberately the only job here that touches anything outside the checkout, and the only
+  # one that needs credentials. It runs on a green build or not at all: `needs` covers the
+  # test suite, the EF drift check and the secret scan, so a red suite cannot ship.
+  #
+  # Publishing uses the .NET SDK's container support, not a Dockerfile - the same path the
+  # Visual Studio profile takes. There is a Dockerfile in the repo and it still works for
+  # `docker build`, but nothing here needs a daemon.
+  #
+  # The image tag is the commit sha, so a running revision names the source it was built
+  # from. `az containerapp update` then creates a revision; existing environment variables
+  # and secrets on the app are carried over untouched, which is why none of them appear here.
+  # ---------------------------------------------------------------------------------------
+  deploy:
+    name: Publish to Azure
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [build, migrations, secrets]
+
+    # Only a real push to dev. Pull requests build and test, they do not ship - and a PR from
+    # a fork cannot be allowed near these credentials at all.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+
+    # Scoped to this job rather than the workflow, so build/migrations/secrets stay read-only.
+    # id-token is what federated (OIDC) sign-in needs; no long-lived Azure secret is stored.
+    permissions:
+      contents: read
+      id-token: write
+
+    # One deploy at a time. Two pushes in quick succession should queue, not race each other
+    # into `az containerapp update` and leave the app on whichever finished last.
+    concurrency:
+      group: deploy-azure
+      cancel-in-progress: false
+
+    environment:
+      name: production
+      url: https://${{ vars.AZURE_APP_FQDN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Sign in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Schema first, image second, and never the other way round.
+      #
+      # Nothing calls Migrate() at startup, so a container carrying a migration the database
+      # has not seen fails on the first query that touches the new column - and it fails at
+      # read time, on a revision that already reports Healthy. Applying here means a failed
+      # migration stops the deploy instead of producing a half-working app.
+      # Neither the migration step nor the container publish restores on its own, and
+      # dotnet ef fails with NETSDK1004 long before it reaches the database.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore SentinelAI.slnx
+
+      - name: Install EF tools
+        run: dotnet tool install --global dotnet-ef --version 10.0.*
+
+      - name: Apply migrations
+        env:
+          ConnectionStrings__DefaultConnection: ${{ secrets.AZURE_SQL_CONNECTION_STRING }}
+        run: >
+          dotnet ef database update
+          --project src/SentinelAI.Infrastructure
+          --startup-project src/SentinelAI.Api
+          --configuration Release
+
+      - name: Sign in to the container registry
+        run: az acr login -n ${{ vars.AZURE_ACR_NAME }}
+
+      - name: Build and push the image
+        run: >
+          dotnet publish src/SentinelAI.Api/SentinelAI.Api.csproj
+          -c Release
+          -r linux-x64
+          --no-self-contained
+          -t:PublishContainer
+          -p:ContainerRegistry=${{ vars.AZURE_ACR_NAME }}.azurecr.io
+          -p:ContainerRepository=sentinelai-api
+          -p:ContainerImageTag=${{ github.sha }}
+
+      - name: Roll the container app onto the new image
+        run: >
+          az containerapp update
+          -n ${{ vars.AZURE_APP_NAME }}
+          -g ${{ vars.AZURE_RESOURCE_GROUP }}
+          --image ${{ vars.AZURE_ACR_NAME }}.azurecr.io/sentinelai-api:${{ github.sha }}
+          -o none
+
+      # A successful `az containerapp update` means the revision was created, not that the
+      # app came up: every boot failure this deployment has had - a missing model key, an
+      # unwritable bundle path - produced exactly that, a green deploy and a dead app.
+      #
+      # 405 is the pass. /v1/scans is POST-only, so Method Not Allowed proves the route is
+      # mapped and the app is serving. 404 would mean it started but mapped nothing; 503 or
+      # a connection failure means no healthy replica.
+      - name: Smoke-test the deployed app
+        run: |
+          fqdn='${{ vars.AZURE_APP_FQDN }}'
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "https://$fqdn/v1/scans" || echo 000)
+            echo "attempt $attempt: HTTP $code"
+            [ "$code" = "405" ] && echo "::notice::Deployed and serving at https://$fqdn" && exit 0
+            sleep 20
+          done
+          echo "::error::App did not answer 405 on /v1/scans after the roll-out. Check the container logs:"
+          echo "  az containerapp logs show -n ${{ vars.AZURE_APP_NAME }} -g ${{ vars.AZURE_RESOURCE_GROUP }} --type console --tail 60"
+          exit 1

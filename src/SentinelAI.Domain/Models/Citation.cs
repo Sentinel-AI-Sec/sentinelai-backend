@@ -1,8 +1,11 @@
-﻿namespace SentinelAI.Domain.Models
+﻿using SentinelAI.Domain.Abstractions;
+
+namespace SentinelAI.Domain.Models
 {
-    public class Citation
+    public class Citation : ITenantOwned
     {
         public Guid Id { get; set; }
+        public Guid TenantId { get; set; }
         public Guid? ChainHopId { get; set; }
         public Guid? ReportId { get; set; }
         public string KnowledgeId { get; set; } = string.Empty;

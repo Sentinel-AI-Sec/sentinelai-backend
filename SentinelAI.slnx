@@ -14,6 +14,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/SentinelAI.Application.Tests/SentinelAI.Application.Tests.csproj" />
     <Project Path="tests/SentinelAI.Domain.Tests/SentinelAI.Domain.Tests.csproj" />
+    <Project Path="tests/SentinelAI.Infrastructure.Tests/SentinelAI.Infrastructure.Tests.csproj" />
     <Project Path="tests/SentinelAI.Integration.Tests/SentinelAI.Integration.Tests.csproj" />
   </Folder>
 </Solution>

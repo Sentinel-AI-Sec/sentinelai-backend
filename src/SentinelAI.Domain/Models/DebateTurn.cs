@@ -1,3 +1,5 @@
+using SentinelAI.Domain.Enums;
+
 namespace SentinelAI.Domain.Models;
 
 /// <summary>
@@ -17,9 +19,14 @@ public sealed record DebateTurn
 
     /// <summary>
     /// Weakest join confidence this turn depends on. Reporter surfaces anything
-    /// <see cref="JoinConfidence.Unresolved"/> as "potential chain, unverified join".
+    /// <see cref="Enums.Confidence.Unresolved"/> as "potential chain, unverified join".
     /// </summary>
-    public JoinConfidence Confidence { get; init; } = JoinConfidence.Certain;
+    /// <remarks>
+    /// Deliberately the same <see cref="Enums.Confidence"/> a <see cref="GraphEdge"/> carries.
+    /// The debate's verdict has to be writable back onto the graph, and two enums for one
+    /// concept is how that quietly stops being true.
+    /// </remarks>
+    public Confidence Confidence { get; init; } = Enums.Confidence.Certain;
 
     /// <summary>
     /// Set by Blue when it cannot break any link — the convergence signal the
@@ -38,6 +45,24 @@ public sealed record DebateTurn
     /// turn-cap — but the outcome is now labelled for what it is.
     /// </remarks>
     public bool VerdictReadable { get; init; } = true;
+
+    /// <summary>
+    /// Which model tier served this turn (SEC-31). Stamped by the executor from the routing
+    /// policy it was built with, so the transcript itself is the evidence that reasoning turns
+    /// went to the high tier and routine ones did not.
+    /// </summary>
+    /// <remarks>
+    /// Recorded per turn rather than looked up per role after the fact. A role's tier is
+    /// configurable, so reading it back from configuration at report time would describe
+    /// whatever the settings say <em>now</em> rather than what actually ran.
+    /// </remarks>
+    public ModelTier Tier { get; init; } = ModelTier.High;
+
+    /// <summary>
+    /// Tokens the provider billed for this turn, or <see cref="TokenUsage.None"/> when it
+    /// reported none. Aggregated by tier into <see cref="DraftAudit.Cost"/>.
+    /// </summary>
+    public TokenUsage Usage { get; init; } = TokenUsage.None;
 
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 }

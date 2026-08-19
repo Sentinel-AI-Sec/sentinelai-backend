@@ -1,6 +1,34 @@
 # Configuration
 
-Providers, credentials, and the knobs that change how the debate behaves.
+Providers, credentials, the database, and the knobs that change how the debate behaves.
+
+---
+
+## 0. Database
+
+`ConnectionStrings:DefaultConnection` is read by `AddInfrastructureServices` and is required
+for migrations and anything touching persistence. **The debate endpoints do not use it** —
+`POST /v1/debates` runs with no database at all, which is why a missing connection string
+does not stop the API from starting.
+
+It is deliberately **not** set in the committed `appsettings.json`: an empty string makes
+`dotnet ef` fail, and a real one does not belong in a tracked file. Set it in one of:
+
+| Location | Use |
+|---|---|
+| `appsettings.Development.json` | Local development. **Git-ignored.** |
+| `ConnectionStrings__DefaultConnection` env var | CI and deployment. |
+| `dotnet user-secrets` | Local development, outside the working tree. |
+
+`appsettings.Development.example.json` carries a zero-setup LocalDB default — copy it to
+`appsettings.Development.json` and adjust.
+
+```bash
+dotnet ef database update --project src/SentinelAI.Infrastructure --startup-project src/SentinelAI.Api
+```
+
+> A connection string with a password in a tracked file fails the CI `secrets` job. Use
+> integrated auth locally and an environment variable everywhere else.
 
 ---
 
@@ -14,11 +42,60 @@ The agents are real `ChatClientAgent`s in every configuration. Only the backing
 | `Scripted` | — | **Default.** Deterministic offline responses. Every test runs here: no key, no network, no spend. |
 | `Nim` | `https://integrate.api.nvidia.com/v1` | NVIDIA NIM. OpenAI-wire-compatible, so it reuses the OpenAI client. |
 | `Anthropic` | `https://api.anthropic.com/v1` | For when Claude access lands. |
-| `AzureOpenAI` | **must be set explicitly** | The AID-01 production target. |
+| `AzureOpenAI` | **must be set explicitly** | The AID-01 production target. See §1.1 — it does not behave like the others. |
 
 Every live provider **fails loud** on a missing key rather than falling back to `Scripted`.
 A silent fallback would produce runs that look successful and mean nothing — the same class
 of bug as the silent embedding fallback AID-01 §5 exists to prevent.
+
+Since SEC-30 this is checked **at startup**, not at the first model call. A live provider
+with a missing key or (for Azure) a missing endpoint refuses to boot, naming the agents that
+lack one. Previously the API accepted a scan, stored the bundle and queued the job before
+discovering the problem inside a debate turn.
+
+### 1.1 Azure OpenAI
+
+Azure speaks the OpenAI *format* but not the OpenAI *protocol*, and gets its own client for
+three reasons — each of which produces a 401 or 404 rather than a useful error if ignored:
+
+| | OpenAI-compatible (`Nim`, `Anthropic`) | `AzureOpenAI` |
+|---|---|---|
+| Auth | `Authorization: Bearer <key>` | `api-key: <key>` |
+| Model | sent in the request body | a **deployment name** in the URL path |
+| Version | — | `api-version` query parameter, required |
+
+The practical consequence: under Azure, **`HighTierModel` and `CheapTierModel` are deployment
+names, not model names.** Azure has no way to ask for `gpt-4o` by name — you create a
+deployment, choose its name, and address that. The defaults (`gpt-4o`, `gpt-4o-mini`) assume
+you named the deployment after the model it serves, which is the usual convention. If yours
+is called something else, set these to the deployment names.
+
+```jsonc
+{
+  "SentinelAI": {
+    "Models": {
+      "Provider": "AzureOpenAI",
+
+      // Your resource URL. No default is possible — the host is your resource name.
+      "Endpoint": "https://my-resource.openai.azure.com",
+
+      // Deployment names, not model names.
+      "HighTierModel": "gpt-4o",
+      "CheapTierModel": "gpt-4o-mini",
+
+      "Agents": {
+        "Orchestrator": { "ApiKey": "" },
+        "Red":          { "ApiKey": "" },
+        "Blue":         { "ApiKey": "" },
+        "Reporter":     { "ApiKey": "" }
+      }
+    }
+  }
+}
+```
+
+A per-agent `Model` is also a deployment name here, which is how one role can be pinned to a
+separately-quota'd deployment.
 
 ---
 
@@ -63,31 +140,74 @@ tier default". This is how you put adjudication on a different model from assert
 
 | Location | Use |
 |---|---|
-| `samples/SentinelAI.Agents.Demo/dev.json` | Local development. **Git-ignored.** |
+| `src/SentinelAI.Api/appsettings.Development.json` | The API. **Git-ignored.** |
+| `samples/SentinelAI.Agents.Demo/dev.json` | The demo runner. **Git-ignored.** |
 | `dotnet user-secrets` | Local development, outside the working tree. |
 | Environment variables | CI and deployment. |
 
-`dev.example.json` is the committed template — copy it to `dev.json` and fill it in.
+Each has a committed `.example` template beside it — copy and fill in.
 
-> **Never commit `dev.json`.** `.gitignore` covers it and the CI `secrets` job fails the
-> build on a tracked secrets file or an `nvapi-` / `sk-ant-` / `sk-` literal anywhere in the
-> tree. A leaked key is not recoverable by reverting the commit — rotate it.
+The committed `appsettings.json` ships `Provider: "Scripted"` so a fresh clone runs with no
+credentials at all. `appsettings.Development.json` overrides it to a live provider.
+
+> **Never commit a filled-in secrets file.** `.gitignore` covers them and the CI `secrets`
+> job fails the build on a tracked secrets file or an `nvapi-` / `sk-ant-` / `sk-` literal
+> anywhere in the tree. A leaked key is not recoverable by reverting the commit — rotate it.
 
 ---
 
 ## 3. Model tiers
 
 AID-01 §2.1 routes reasoning-heavy turns to a high tier and routine turns to a cheap one.
+The shipped policy, in `SentinelAI:Debate:Tiers`:
 
-```csharp
-Tiers[AgentRole.Red]      = ModelTier.High;
-Tiers[AgentRole.Blue]     = ModelTier.High;
-Tiers[AgentRole.Reporter] = ModelTier.High;
+| Role | Tier | Why |
+|---|---|---|
+| `Red` | `High` | Chaining — reasoning-heavy. |
+| `Blue` | `High` | Link validation — reasoning-heavy, and the false-positive reducer. |
+| `Reporter` | `High` | Adjudication — reasoning-heavy. |
+| `Orchestrator` | `Cheap` | Briefs Red from the graph and asserts nothing. The routine turn. |
+
+Which model id a tier resolves to is `HighTierModel` / `CheapTierModel` (§1), per provider.
+Overriding a role is a config change:
+
+```json
+"SentinelAI": { "Debate": { "Tiers": { "Reporter": "Cheap" } } }
 ```
 
-All three default to high because chaining, link validation and adjudication are all
-reasoning-heavy. The cheap tier is wired and available for routine formatting work added
-later.
+Whatever the map says, **the tier that actually served a turn is stamped on that turn** and
+shows up in the audit's cost breakdown — see [Cost_Tracking.md](Cost_Tracking.md). Reading
+the policy back out of configuration would describe what the settings say now rather than
+what ran.
+
+---
+
+## 3.1 Token prices
+
+`SentinelAI:Models:Pricing` turns measured tokens into money. Rates are per **million**
+tokens, quoted separately for input and output because every provider prices them
+differently.
+
+```json
+"SentinelAI": {
+  "Models": {
+    "Pricing": {
+      "Currency": "USD",
+      "High":  { "InputPerMillionTokens": 2.50, "OutputPerMillionTokens": 10.00 },
+      "Cheap": { "InputPerMillionTokens": 0.15, "OutputPerMillionTokens": 0.60 }
+    }
+  }
+}
+```
+
+Nothing needs to be set for Azure, Anthropic or Scripted: published list prices are built
+into `ProviderPricing` and used per tier when configuration supplies none. Configuration wins
+where it is present, which is what negotiated rates and repriced models need.
+
+**NIM ships no default**, because its price depends on how it is hosted. Its tokens are still
+counted; the audit reports them with `rated: false` and a total of zero, which means *"we do
+not know what this cost"* rather than *"this was free"*. Set the two `High`/`Cheap` blocks
+above to price it. Full behaviour in [Cost_Tracking.md](Cost_Tracking.md).
 
 ---
 
@@ -126,3 +246,71 @@ specific failure that a real model will not reproduce on demand.
 Expect **90–140 seconds** for a live run: the calls are sequential and non-streaming, so
 nothing prints while an agent is thinking. The spinner shows it is alive. See
 [Live_Model_Findings.md §6](Live_Model_Findings.md) for measured latency.
+
+---
+
+## 6. The knowledge corpus (SEC-22)
+
+Retrieval reads two Qdrant collections, `offense` and `defense`, that Pipeline A
+(`sentinelai-knowledge`) produced. Pipeline B only ever reads them.
+
+```yaml
+Knowledge:
+  Endpoint: https://<cluster>.cloud.qdrant.io:6334   # gRPC, not the 6333 REST port
+  ApiKey: "<cluster key>"                            # empty for a local container
+  Embedder:
+    BaseUrl: ""                                      # optional — see 6.2
+```
+
+**The endpoint alone turns SEC-22 on.** With it set, the real decision tree answers; without it,
+the walking-skeleton stub does and warns on every call.
+
+> **Port 6334, not 6333.** The .NET client speaks gRPC. Pointing it at the REST port gives a
+> protocol error rather than a message about the wrong port.
+
+### 6.1 The embedder is optional
+
+| Mode | Fires when | Needs a model? |
+|---|---|---|
+| Exact filter | The finding carries a clean CVE or CWE | **No** — a payload filter, no vector involved |
+| Semantic | No clean id, dense-only embedder | Yes |
+| Hybrid | No clean id, embedder has a lexical head | Yes |
+
+A corpus with no embedder is a **supported configuration, not a degraded one**. Findings carrying
+an identifier — most of them, once SEC-15's rule-mapping table has run — ground against the real
+corpus. Findings without one record an honest miss (`no embedding model is configured`) rather
+than falling back to canned text or crashing the scan.
+
+Set `Knowledge:Embedder:BaseUrl` when you want the meaning-based arms; see
+`sentinelai-knowledge/service/README.md` for standing that service up.
+
+### 6.2 Proving it is the real corpus, not the stub
+
+The stub answers for CWE-502 too, so "chunks came back" is not evidence. Two things distinguish
+them: a real chunk carries a `chunk_id` and a `corpus_version`, and the stub logs a warning on
+every single call.
+
+```bash
+$env:SENTINELAI_CORPUS_URL="https://<cluster>.cloud.qdrant.io:6334"
+```
+
+```bash
+$env:SENTINELAI_CORPUS_KEY="<key>"; dotnet test tests/SentinelAI.Integration.Tests --filter "FullyQualifiedName~LiveCorpusSmokeTests"
+```
+
+Four read-only tests against the live corpus. They assert the container hands back the real
+retriever, that a CWE lookup returns the weakness definition rather than the CVEs tagged with it,
+and that what came back carries a corpus version.
+
+### 6.3 The adapter tests need a throwaway instance
+
+`QdrantKnowledgeSearchTests` **creates and deletes collections named exactly `offense` and
+`defense`**. Never point it at a populated corpus — it would destroy it.
+
+```bash
+docker run -d --rm --name qdrant-test -p 6344:6333 -p 6345:6334 qdrant/qdrant
+```
+
+```bash
+$env:SENTINELAI_QDRANT="http://localhost:6345"; dotnet test tests/SentinelAI.Integration.Tests
+```

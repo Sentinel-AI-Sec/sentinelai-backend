@@ -1,5 +1,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
+using SentinelAI.Application.Debate;
+using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
 
 namespace SentinelAI.Infrastructure.Agents.Executors;
@@ -12,8 +14,16 @@ namespace SentinelAI.Infrastructure.Agents.Executors;
 /// guarantees SEC-02's "turn-cap exceeded → orchestrator terminates cleanly; Reporter
 /// still outputs". It is the only executor that yields workflow output and halts the run.
 /// </remarks>
-public sealed class ReporterExecutor(AIAgent agent, int maxRounds)
-    : DebateExecutor<DraftAudit>(ExecutorId, agent, AgentRole.Reporter)
+/// <param name="pricing">
+/// Token rates used to turn the debate's measured usage into the cost figure SEC-31 puts on
+/// the audit. Null records tokens without money, which is what an unpriced provider deserves.
+/// </param>
+public sealed class ReporterExecutor(
+    AIAgent agent,
+    int maxRounds,
+    ModelTier tier = ModelTier.High,
+    ModelPricing? pricing = null)
+    : DebateExecutor<DraftAudit>(ExecutorId, agent, AgentRole.Reporter, tier)
 {
     /// <summary>Node id in the workflow graph. Named to avoid shadowing <c>Executor.Id</c>.</summary>
     public const string ExecutorId = "reporter";
@@ -68,7 +78,7 @@ public sealed class ReporterExecutor(AIAgent agent, int maxRounds)
                 cancellationToken)
             .ConfigureAwait(false);
 
-        var audit = BuildAudit(state, turn, cappedOut);
+        var audit = BuildAudit(state, turn, cappedOut, pricing);
         await context.YieldOutputAsync(audit, cancellationToken).ConfigureAwait(false);
 
         // Clean termination — the orchestrator's job per AID-01 3.1.
@@ -76,7 +86,8 @@ public sealed class ReporterExecutor(AIAgent agent, int maxRounds)
         return audit;
     }
 
-    private static DraftAudit BuildAudit(DebateState state, DebateTurn closing, bool cappedOut) => new()
+    private static DraftAudit BuildAudit(
+        DebateState state, DebateTurn closing, bool cappedOut, ModelPricing? pricing) => new()
     {
         Summary = closing.Content,
         Transcript = state.Transcript,
@@ -84,8 +95,12 @@ public sealed class ReporterExecutor(AIAgent agent, int maxRounds)
         TerminatedByTurnCap = cappedOut,
         Converged = closing.Converged,
         VerdictReadable = closing.VerdictReadable,
-        WeakestJoin = state.Transcript.Count == 0
-            ? JoinConfidence.Certain
-            : state.Transcript.Min(t => t.Confidence)
+        // The named rule, not Min(), so the enum's declaration order stops being load-bearing
+        // for anyone reading this — the shared enum now has a second owner (the graph).
+        WeakestJoin = state.Transcript.Weakest(t => t.Confidence),
+        // AllTurns, not Transcript: the Orchestrator's briefing is a billed model call that
+        // deliberately does not count as a debate turn, and leaving it out would under-report
+        // every scan by one call.
+        Cost = CostAccounting.Measure(state.AllTurns, pricing)
     };
 }

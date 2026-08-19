@@ -132,6 +132,43 @@ public class PerAgentKeyTests
         Assert.Empty(options.AgentsMissingKeys(DebateWorkflow.ModelBackedRoles));
     }
 
+    // The loader reads every field by name, and used to skip these two — so the settings
+    // bounding how long a stalled provider can hang the debate, and how often a failed call
+    // is repeated, silently kept their defaults whatever configuration said.
+    [Fact]
+    public void The_timeout_and_retry_ceiling_are_read_from_configuration()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["SentinelAI:Models:RequestTimeout"] = "00:00:45",
+                ["SentinelAI:Models:MaxRetries"] = "1"
+            })
+            .Build();
+
+        var options = ModelOptionsLoader.Load(configuration);
+
+        Assert.Equal(TimeSpan.FromSeconds(45), options.RequestTimeout);
+        Assert.Equal(1, options.MaxRetries);
+    }
+
+    [Fact]
+    public void An_unparseable_timeout_leaves_the_default_rather_than_disabling_it()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["SentinelAI:Models:RequestTimeout"] = "not-a-timespan",
+                ["SentinelAI:Models:MaxRetries"] = "-4"
+            })
+            .Build();
+
+        var options = ModelOptionsLoader.Load(configuration);
+
+        Assert.Equal(TimeSpan.FromSeconds(120), options.RequestTimeout);
+        Assert.Equal(3, options.MaxRetries);
+    }
+
     [Fact]
     public void An_environment_variable_overrides_the_configured_key()
     {

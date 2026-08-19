@@ -1,4 +1,5 @@
 using SentinelAI.Application.Debate;
+using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
 using SentinelAI.Infrastructure.Agents.Executors;
 using SentinelAI.Infrastructure.Agents.Orchestration;
@@ -97,7 +98,69 @@ public class DebateAcceptanceTests
         var result = await new DebateRunner(debate.Workflow).RunAsync(ScanBrief.Stub());
 
         Assert.NotNull(result.Audit);
-        Assert.Equal(JoinConfidence.Inferred, result.Audit!.WeakestJoin);
+        Assert.Equal(Confidence.Inferred, result.Audit!.WeakestJoin);
+    }
+
+    // AID-01 3.3: unconfirmable is not refuted. A hop Blue could not check must not break
+    // the chain — treating it as a break is what made every live run burn the full turn-cap.
+    [Fact]
+    public async Task An_unresolved_hop_alone_does_not_break_the_chain()
+    {
+        var debate = TestDebate.Create(
+            blue: (_, _) =>
+                """
+                hop 1: confirmed against packages.lock.json. CONFIRMED
+                hop 2: image-name join not settleable from this evidence. UNRESOLVED
+                VERDICT: CHAIN_HOLDS
+                """);
+
+        var result = await new DebateRunner(debate.Workflow).RunAsync(ScanBrief.Stub());
+
+        Assert.NotNull(result.Audit);
+        Assert.Equal(DebateOutcome.Converged, result.Audit!.Outcome);
+        Assert.False(result.Audit.TerminatedByTurnCap);
+        Assert.Equal(Confidence.Unresolved, result.Audit.WeakestJoin);
+
+        // One round, not the full cap: Red asserted once and was not asked to re-assert.
+        Assert.Equal(1, debate.RedClient.CallCount);
+    }
+
+    // The verdict is the closing line, not "does this token appear anywhere". Blue now
+    // reasons about REFUTED vs UNRESOLVED out loud, so its prose mentions both outcomes.
+    [Fact]
+    public async Task The_closing_line_decides_the_verdict_not_the_prose_above_it()
+    {
+        var debate = TestDebate.Create(
+            blue: (_, _) =>
+                """
+                hop 2: this would be CHAIN_BROKEN only if the role were unscoped. It is not.
+                VERDICT: CHAIN_HOLDS
+                """);
+
+        var result = await new DebateRunner(debate.Workflow).RunAsync(ScanBrief.Stub());
+
+        Assert.NotNull(result.Audit);
+        Assert.Equal(DebateOutcome.Converged, result.Audit!.Outcome);
+    }
+
+    // SEC-27's evidence AC: a hop Blue marks CONFIRMED must carry the evidence that confirms
+    // it through to the Reporter, not just the verdict token — otherwise the Reporter's own
+    // citation requirement (SEC-28) has nothing per-hop to point at.
+    [Fact]
+    public async Task Blues_confirmed_evidence_survives_to_reach_the_reporter()
+    {
+        var debate = TestDebate.Create(
+            blue: (_, _) =>
+                """
+                hop 1: role attaches to task per infra/main.tf:12. CONFIRMED
+                VERDICT: CHAIN_HOLDS
+                """);
+
+        var result = await new DebateRunner(debate.Workflow).RunAsync(ScanBrief.Stub());
+
+        Assert.NotNull(result.Audit);
+        var blueTurn = Assert.Single(result.Audit!.Transcript, t => t.Role == AgentRole.Blue);
+        Assert.Contains("infra/main.tf:12", blueTurn.Content, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -109,7 +172,7 @@ public class DebateAcceptanceTests
         var result = await new DebateRunner(debate.Workflow).RunAsync(ScanBrief.Stub());
 
         Assert.NotNull(result.Audit);
-        Assert.Equal(JoinConfidence.Unresolved, result.Audit!.WeakestJoin);
+        Assert.Equal(Confidence.Unresolved, result.Audit!.WeakestJoin);
         // Still reported — never silently killed.
         Assert.NotEmpty(result.Audit.Summary);
         Assert.Contains("draft audit", result.Audit.Disclaimer, StringComparison.OrdinalIgnoreCase);
