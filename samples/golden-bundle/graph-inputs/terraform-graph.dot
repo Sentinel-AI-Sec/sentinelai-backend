@@ -1,0 +1,9 @@
+digraph {
+  compound = "true"
+  newrank = "true"
+  subgraph "root" {
+    "[root] aws_ecs_task_definition.order_task" -> "[root] aws_iam_role.order_task_role"
+    "[root] aws_iam_role_policy.order_task_policy" -> "[root] aws_iam_role.order_task_role"
+    "[root] aws_iam_role_policy.order_task_policy" -> "[root] aws_s3_bucket.customer_data"
+  }
+}

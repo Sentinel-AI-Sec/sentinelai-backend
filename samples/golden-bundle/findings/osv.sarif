@@ -1,0 +1,23 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "osv-scanner",
+          "rules": [
+            { "id": "CVE-2024-21907", "shortDescription": { "text": "CVE-2024-21907: Improper handling of exceptional conditions in Newtonsoft.Json" } }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "CVE-2024-21907",
+          "level": "error",
+          "message": { "text": "Package 'Newtonsoft.Json@12.0.1' is vulnerable to 'CVE-2024-21907' (also known as 'GHSA-5crp-9r3c-p9vr')." },
+          "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "file:///home/runner/work/repo/repo/src/OrderApp/packages.lock.json" } } }]
+        }
+      ]
+    }
+  ]
+}
