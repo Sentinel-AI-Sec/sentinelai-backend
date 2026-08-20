@@ -3,6 +3,7 @@ using SentinelAI.Application.Abstractions;
 using SentinelAI.Application.Debate;
 using SentinelAI.Domain.Models;
 using SentinelAI.Infrastructure.Agents.Providers;
+using SentinelAI.Infrastructure.Observability;
 
 namespace SentinelAI.Infrastructure.Agents.Orchestration;
 
@@ -24,7 +25,8 @@ namespace SentinelAI.Infrastructure.Agents.Orchestration;
 public sealed class DebateEngine(
     IChatClientFactory clients,
     IOptions<DebateOptions> options,
-    ModelPricing? pricing = null) : IDebateEngine
+    ModelPricing? pricing = null,
+    TurnTracing? tracing = null) : IDebateEngine
 {
     private readonly IChatClientFactory _clients =
         clients ?? throw new ArgumentNullException(nameof(clients));
@@ -38,13 +40,30 @@ public sealed class DebateEngine(
     /// </summary>
     private readonly ModelPricing _pricing = pricing ?? ModelPricing.Unpriced;
 
+    /// <summary>
+    /// What each turn's span may record (SEC-36). Optional, and metadata-only when omitted, for
+    /// the same reason <see cref="_pricing"/> is: a caller constructing the engine by hand gets
+    /// the safe behaviour without having to know this parameter exists.
+    /// </summary>
+    private readonly TurnTracing _tracing = tracing ?? TurnTracing.MetadataOnly;
+
     public async Task<DraftAudit> RunAsync(ScanBrief brief, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(brief);
 
-        var workflow = DebateWorkflow.Build(_clients, _options, _pricing);
+        // SEC-36's root span. Every turn span nests inside it, which is what lets a reader open
+        // one trace and see the whole debate rather than four unrelated model calls. Null when
+        // nothing is listening, and `using` handles that.
+        using var trace = DebateTracing.StartDebate(brief.ScanJobId);
+
+        var workflow = DebateWorkflow.Build(_clients, _options, _pricing, _tracing);
         var result = await new DebateRunner(workflow).RunAsync(brief, cancellationToken: ct)
             .ConfigureAwait(false);
+
+        // Recorded before the throw below, so a debate that ended without an audit still leaves
+        // a trace saying how far it got — which is the case someone is most likely to go
+        // looking at a trace for.
+        DebateTracing.RecordOutcome(trace, result.Turns.Count, result.Audit?.Converged ?? false);
 
         // The Reporter is reachable on every terminating path, so a missing audit means the
         // run failed rather than merely disagreeing. Surfacing it as an exception keeps the

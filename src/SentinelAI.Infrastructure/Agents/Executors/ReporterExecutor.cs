@@ -3,6 +3,7 @@ using Microsoft.Agents.AI.Workflows;
 using SentinelAI.Application.Debate;
 using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
+using SentinelAI.Infrastructure.Observability;
 
 namespace SentinelAI.Infrastructure.Agents.Executors;
 
@@ -22,8 +23,9 @@ public sealed class ReporterExecutor(
     AIAgent agent,
     int maxRounds,
     ModelTier tier = ModelTier.High,
-    ModelPricing? pricing = null)
-    : DebateExecutor<DraftAudit>(ExecutorId, agent, AgentRole.Reporter, tier)
+    ModelPricing? pricing = null,
+    TurnTracing? tracing = null)
+    : DebateExecutor<DraftAudit>(ExecutorId, agent, AgentRole.Reporter, tier, tracing)
 {
     /// <summary>Node id in the workflow graph. Named to avoid shadowing <c>Executor.Id</c>.</summary>
     public const string ExecutorId = "reporter";

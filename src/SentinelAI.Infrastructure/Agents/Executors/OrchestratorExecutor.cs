@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using SentinelAI.Domain.Models;
+using SentinelAI.Infrastructure.Observability;
 
 namespace SentinelAI.Infrastructure.Agents.Executors;
 
@@ -29,6 +31,7 @@ public sealed class OrchestratorExecutor : Executor<ScanBrief, DebateTurn>
 
     private readonly AIAgent? _agent;
     private readonly ModelTier _tier;
+    private readonly TurnTracing? _tracing;
 
     /// <summary>Creates a model-backed orchestrator that analyses the brief via NIM.</summary>
     /// <param name="agent">The backing agent.</param>
@@ -37,10 +40,16 @@ public sealed class OrchestratorExecutor : Executor<ScanBrief, DebateTurn>
     /// briefing is the routine turn SEC-31 routes away from the reasoning model. Recorded on
     /// the seed turn so the audit's cost breakdown can charge it to the right tier.
     /// </param>
-    public OrchestratorExecutor(AIAgent agent, ModelTier tier = ModelTier.Cheap) : base(ExecutorId)
+    /// <param name="tracing">
+    /// Whether the seed turn's span may carry its prompt and answer (SEC-36). Null is metadata
+    /// only.
+    /// </param>
+    public OrchestratorExecutor(AIAgent agent, ModelTier tier = ModelTier.Cheap, TurnTracing? tracing = null)
+        : base(ExecutorId)
     {
         _agent = agent ?? throw new ArgumentNullException(nameof(agent));
         _tier = tier;
+        _tracing = tracing;
     }
 
     /// <summary>
@@ -64,14 +73,33 @@ public sealed class OrchestratorExecutor : Executor<ScanBrief, DebateTurn>
         var content = message.Context;
         var usage = TokenUsage.None;
 
+        // SEC-36. Traced through the same helpers the other three agents use — this is the
+        // second and last place a model call is made, and two call sites with two ways of
+        // recording a turn is how the seed ends up missing from every trace.
+        Activity? span = null;
+
         if (_agent is not null)
         {
             var prompt = $"Briefing for Red Team:\n{message.Context}";
-            var response = await _agent
-                .RunAsync(prompt, cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-            content = response.Text ?? content;
-            usage = DebateExecutor<DebateTurn>.UsageOf(response);
+            span = DebateTracing.StartTurn(AgentRole.Orchestrator, _tier, prompt, _tracing);
+
+            try
+            {
+                var response = await _agent
+                    .RunAsync(prompt, cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+
+                DebateTracing.RecordResponse(span, response, _tracing);
+
+                content = response.Text ?? content;
+                usage = DebateExecutor<DebateTurn>.UsageOf(response);
+            }
+            catch (Exception ex)
+            {
+                DebateTracing.RecordFailure(span, ex);
+                span?.Dispose();
+                throw;
+            }
         }
 
         var seed = new DebateTurn
@@ -82,6 +110,12 @@ public sealed class OrchestratorExecutor : Executor<ScanBrief, DebateTurn>
             Tier = _tier,
             Usage = usage
         };
+
+        // Closed here rather than in a `using` above, so the span covers the seed's construction
+        // for the same reason the other three cover their interpretation — and so the round it
+        // reports comes from the turn rather than from a literal repeated beside it.
+        DebateTracing.RecordTurn(span, seed);
+        span?.Dispose();
 
         // Round 0 seeds the state but is not itself a debate turn, so the transcript
         // starts empty and TurnCount counts only real agent turns. The seed is still kept

@@ -5,6 +5,7 @@ using SentinelAI.Application.Debate;
 using SentinelAI.Domain.Models;
 using SentinelAI.Infrastructure.Agents.Executors;
 using SentinelAI.Infrastructure.Agents.Providers;
+using SentinelAI.Infrastructure.Observability;
 
 namespace SentinelAI.Infrastructure.Agents.Orchestration;
 
@@ -37,8 +38,15 @@ public static class DebateWorkflow
     /// Token rates for the audit's cost breakdown (SEC-31). Null counts tokens without
     /// pricing them, which is what the audit then reports.
     /// </param>
+    /// <param name="tracing">
+    /// What each turn's span may record (SEC-36). Null is metadata only — tokens, tier, latency
+    /// and outcome, but no prompts or answers.
+    /// </param>
     public static Workflow Build(
-        IChatClientFactory clients, DebateOptions? options = null, ModelPricing? pricing = null)
+        IChatClientFactory clients,
+        DebateOptions? options = null,
+        ModelPricing? pricing = null,
+        TurnTracing? tracing = null)
     {
         ArgumentNullException.ThrowIfNull(clients);
         options ??= new DebateOptions();
@@ -51,18 +59,22 @@ public static class DebateWorkflow
 
         var orchestrator = new OrchestratorExecutor(
             CreateAgent(clients, options, AgentRole.Orchestrator, "Orchestrator", OrchestratorExecutor.Instructions),
-            tiers[AgentRole.Orchestrator]);
+            tiers[AgentRole.Orchestrator],
+            tracing);
         var red = new RedTeamExecutor(
             CreateAgent(clients, options, AgentRole.Red, "RedTeam", RedTeamExecutor.Instructions),
-            tiers[AgentRole.Red]);
+            tiers[AgentRole.Red],
+            tracing);
         var blue = new BlueTeamExecutor(
             CreateAgent(clients, options, AgentRole.Blue, "BlueTeam", BlueTeamExecutor.Instructions),
-            tiers[AgentRole.Blue]);
+            tiers[AgentRole.Blue],
+            tracing);
         var reporter = new ReporterExecutor(
             CreateAgent(clients, options, AgentRole.Reporter, "Reporter", ReporterExecutor.Instructions),
             options.MaxRounds,
             tiers[AgentRole.Reporter],
-            pricing);
+            pricing,
+            tracing);
 
         return Build(orchestrator, red, blue, reporter, options.MaxRounds);
     }
