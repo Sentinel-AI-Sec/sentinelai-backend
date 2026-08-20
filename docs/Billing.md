@@ -218,3 +218,86 @@ in under a minute, and that log line is the only trace that survives the purge.
 `IBillingGateway` is faked; `IBillingEventReader` deliberately is not. The signature check is the
 only authentication on the only endpoint that can grant a paid plan, so a test that stubbed it out
 would be a test that the endpoint works when authentication is disabled.
+
+---
+
+## 8. Deploying it
+
+Everything in §2 is a developer machine. A deployed instance differs in three ways that each
+produce a *working-looking* system that does not take payments, so they are worth stating.
+
+### The connection string lives in two places, and they are not the same place
+
+| Where | Who reads it |
+|---|---|
+| GitHub secret `AZURE_SQL_CONNECTION_STRING` | **only** the `Apply migrations` step in `ci.yml` |
+| Container App secret `sql-default-connection` | the running process |
+
+`az containerapp update` in the deploy job passes `--image` and nothing else — existing environment
+variables and secrets are carried across revisions untouched, which is deliberate and is why none
+of them appear in the workflow. So updating the GitHub secret alone migrates one database while the
+app keeps serving from another, and both halves report success. Change both, or neither.
+
+> The GitHub secret is still named `AZURE_SQL_CONNECTION_STRING` while pointing at MonsterASP
+> (`db64146.public.databaseasp.net`). Renaming it means editing `ci.yml` in the same commit.
+
+### The Stripe config is not in the image
+
+`Billing:SecretKey` and the price table are configuration, so a fresh deployment has none and
+answers `503` — the UI's "billing is not configured on this deployment" state. The container app
+carries them as:
+
+| Env var | Source |
+|---|---|
+| `Billing__SecretKey` | secret ref `stripe-secret-key` |
+| `Billing__WebhookSecret` | secret ref `stripe-webhook-secret` |
+| `Billing__Prices__team__Monthly` | `price_...` (public id, plain value) |
+| `Billing__Prices__team__Annual` | `price_...` (public id, plain value) |
+
+`Billing__AllowedReturnOrigins` is left unset on purpose: it falls back to `Cors:AllowedOrigins`,
+which already has to name the console's origin for the browser to reach the API at all. One list.
+
+Set them with `az containerapp update --set-env-vars`, which adds and updates. **Not
+`--replace-env-vars`** — that substitutes the whole list, and every model key, the JWT key and the
+connection string go with it.
+
+`BillingSettings` is built once at registration (`DependencyInjection`), so a changed secret needs a
+new revision before it is read. Azure says as much when you set one.
+
+### `stripe listen` does not sign a deployed app's webhooks
+
+The `whsec_` the CLI prints belongs to the CLI's own listener and signs only what that process
+forwards. A deployed app needs a real endpoint registered against its public URL, and the signing
+secret is returned **once**, at creation — there is no way to read it back afterwards.
+
+```bash
+# The five events HandleBillingWebhookCommandHandler acts on. `secret` in the response is the
+# whsec_ to configure — capture it here or create the endpoint again.
+curl -s -u "$STRIPE_SECRET_KEY:" https://api.stripe.com/v1/webhook_endpoints \
+  -d "url=https://<app-fqdn>/v1/billing/webhook" \
+  -d "description=SentinelAI deployed API" \
+  -d "enabled_events[]=checkout.session.completed" \
+  -d "enabled_events[]=customer.subscription.created" \
+  -d "enabled_events[]=customer.subscription.updated" \
+  -d "enabled_events[]=customer.subscription.deleted" \
+  -d "enabled_events[]=invoice.payment_failed"
+```
+
+The Stripe CLI can do the same with `stripe webhook_endpoints create --url ... --enabled-events ...`
+— note it takes a repeated `--enabled-events` flag, not the `-d "enabled_events[]="` form the raw
+API uses.
+
+Register it as `https://` directly. Stripe does **not** follow redirects on webhook delivery, and
+`UseHttpsRedirection` is on outside Development — an `http://` endpoint records every delivery as a
+failure and retries until it gives up. No test catches this.
+
+### Checking a deployment without spending anything
+
+```
+GET  /v1/health              -> 200
+POST /v1/billing/checkout    -> 401 unauthenticated, NOT 503   # 503 = Stripe config missing
+POST /v1/billing/webhook     -> 400 on a bogus Stripe-Signature # 400 = verification running
+```
+
+The middle line is the useful one: `401` and `503` are the difference between "billing is wired up"
+and "the UI will tell every customer it is not".
