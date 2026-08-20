@@ -106,6 +106,29 @@ submitter opted into retention, so "not found" can mean the audit ran and, as as
 `report:read` is separate from `scan:read` on purpose. A token allowed to poll a scan's status is
 not automatically allowed to read what the debate concluded.
 
+### Billing — `BillingController`
+
+| Method | Route | Auth | Format |
+|---|---|---|---|
+| GET | `/v1/billing/subscription` | any token | envelope |
+| POST | `/v1/billing/checkout` | `admin` | envelope |
+| POST | `/v1/billing/portal` | `admin` | envelope |
+| POST | `/v1/billing/webhook` | **Stripe signature** | envelope |
+
+Reading a plan needs only a token; starting or managing one is `admin`, because buying changes what
+the tenant *is* rather than what it has looked at — the same test `POST /v1/projects` and
+`DELETE /v1/account` apply. The payload inside the envelope is snake_case, matching the SEC-40 read
+shapes rather than the envelope around it.
+
+`/v1/billing/webhook` is the only unauthenticated **write** in the API and the only endpoint that
+can grant a paid plan. It carries no bearer token because Stripe has none to send; what stands in
+for one is an HMAC over the exact request body, keyed with `Billing:WebhookSecret`. It is also the
+one route that runs with no tenant, so it reaches its row through `IBillingSubscriptionStore` rather
+than the tenant-filtered repository. Both are covered in `docs/Billing.md`.
+
+With no Stripe keys configured, all four answer `503` with a reason rather than failing at the
+vendor — a deployment that sells nothing is a supported state.
+
 ### Debate — `DebateController`
 
 | Method | Route | Auth | Format |
@@ -151,6 +174,12 @@ What `sentinelai-frontend` actually issues, as of this document.
 | `/reports/:id` | `GET /v1/reports/{id}`, `GET …/findings` |
 | `/debate` | `POST /v1/debates`, `POST /v1/debates/demo` |
 | `/account` | `DELETE /v1/account` |
+| `/pricing` | `POST /v1/billing/checkout` |
+| `/billing` | `GET /v1/billing/subscription`, `POST …/checkout`, `POST …/portal` |
+
+`POST /v1/billing/webhook` has no console caller and never will: it is called by Stripe. The
+billing screen treats its return from Checkout as a cue to re-read `GET …/subscription`, because a
+redirect is not proof of payment.
 
 `GET …/bundle` and `GET …/chains` have client methods in `core/api/scan-api.ts` and no caller:
 the report embeds its own chains, and no screen shows bundle provenance yet.

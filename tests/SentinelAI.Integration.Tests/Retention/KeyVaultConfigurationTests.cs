@@ -196,6 +196,12 @@ public class KeyVaultConfigurationTests
             "Observability:Tracing:",
             "Knowledge:",
             "Cors:",
+
+            // The Stripe secret key and webhook secret, bound by StripeOptions (Infrastructure).
+            // The webhook secret in particular is the only authentication on the one endpoint
+            // that can grant a paid plan, so an alias that silently landed nowhere would leave
+            // the vault log reporting success while every delivery was rejected.
+            "Billing:",
         ];
 
         Assert.All(aliases, alias => Assert.True(
