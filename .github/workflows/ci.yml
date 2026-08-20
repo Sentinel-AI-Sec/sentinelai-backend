@@ -68,6 +68,48 @@ jobs:
           path: TestResults/*.trx
           if-no-files-found: ignore
 
+      - name: Full-flow regression harness (SEC-49)
+        # Re-runs the harness on its own, after the suite, and always — even when the suite
+        # above went red.
+        #
+        # It is not a second copy of the test: `dotnet test` has already executed these, and
+        # running them again costs five seconds. What the separate step buys is the thing SEC-49
+        # is actually for. A regression in a seam surfaces here as one named step failing with a
+        # stage table in the log ("BROKEN AT: Graph — 8 node(s) and no edges"), instead of as
+        # six assertions buried in a .trx among nine hundred others. `if: always()` matters for
+        # the same reason: when a unit test elsewhere fails, the most useful next question is
+        # whether the pipeline still runs end to end, and a skipped step cannot answer it.
+        if: always()
+        run: >
+          dotnet test SentinelAI.slnx
+          --no-build
+          --configuration Release
+          --filter "FullyQualifiedName~Regression"
+          --logger "console;verbosity=detailed"
+
+      - name: Pack the demo bundle (SEC-44)
+        # The demo driver's packing half, which is where the bundle contract lives and the only
+        # half that can be wrong without a server. It asserts the three entries whose absence or
+        # misnaming ingest refuses with a 422 — the failure that otherwise surfaces five minutes
+        # before a presentation. That the resulting archive *shape* is accepted is covered by
+        # DemoBundleTests; this covers the script that produces it.
+        #
+        # Invoked as `bash ./scripts/…` rather than `./scripts/…`: the repository's shell scripts
+        # are tracked mode 100644 (corpus.sh is too), and Windows checkouts do not record an
+        # executable bit, so relying on one would work here and fail for whoever committed next
+        # from a laptop.
+        run: bash ./scripts/demo.sh --pack-only --out "$RUNNER_TEMP/demo-pack"
+
+      - name: Smoke-run the benchmark runner (SEC-39)
+        # The scorer is unit-tested; the runner is not reachable from a unit test, because its
+        # whole job is reading a directory. This runs it over the committed sample corpus so the
+        # reader, the SARIF parser and the renderer are exercised by CI rather than only by
+        # whoever last ran it by hand. Deterministic and offline — no corpus, no licences.
+        run: >
+          dotnet run --project tools/SentinelAI.Benchmark
+          --configuration Release --no-build
+          -- --corpus tools/SentinelAI.Benchmark/sample-corpus
+
       - name: Smoke-run the offline demo
         # Proves the sample still runs end to end. Scripted provider, so it is deterministic
         # and free — a broken demo should fail CI, not the sprint review.
