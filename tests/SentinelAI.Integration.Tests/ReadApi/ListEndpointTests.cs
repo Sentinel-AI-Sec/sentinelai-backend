@@ -33,6 +33,20 @@ public class ListEndpointTests : IClassFixture<ScanApiFactory>
 
     private readonly Guid _tenantId = Guid.NewGuid();
     private readonly Guid _userId = Guid.CreateVersion7();
+
+    /// <summary>
+    /// This instance's analyst, unique per test for the same reason every id above is.
+    /// </summary>
+    /// <remarks>
+    /// xunit constructs the test class once per test method while <see cref="ScanApiFactory"/>
+    /// is a class fixture, so this seed runs against one shared database as many times as there
+    /// are tests here. Every other seeded value is a fresh guid and collides with nothing; the
+    /// email was a literal, and <c>Users.Email</c> carries a globally unique index — deliberately,
+    /// see <c>UserConfiguration</c>. Under the in-memory provider that index was not enforced and
+    /// twenty-odd duplicate analysts accumulated silently. On SQLite the second seed is a
+    /// constraint violation, which is the honest answer and the reason the host moved.
+    /// </remarks>
+    private readonly string _email = $"analyst-{Guid.NewGuid():N}@example.test";
     private readonly Guid _projectA = Guid.CreateVersion7();
     private readonly Guid _projectB = Guid.CreateVersion7();
 
@@ -403,7 +417,7 @@ public class ListEndpointTests : IClassFixture<ScanApiFactory>
         // The two fields a JWT cannot carry, and the reason this endpoint exists: without them
         // the account screen can show a GUID and nothing a person recognises.
         Assert.Equal("Acme Security", identity.GetProperty("tenantName").GetString());
-        Assert.Equal("analyst@example.test", identity.GetProperty("email").GetString());
+        Assert.Equal(_email, identity.GetProperty("email").GetString());
 
         Assert.Equal(_tenantId.ToString(), identity.GetProperty("tenantId").GetString());
         Assert.Equal(_userId.ToString(), identity.GetProperty("userId").GetString());
@@ -519,7 +533,7 @@ public class ListEndpointTests : IClassFixture<ScanApiFactory>
 
             db.Users.Add(new User
             {
-                Id = _userId, TenantId = _tenantId, Email = "analyst@example.test",
+                Id = _userId, TenantId = _tenantId, Email = _email,
                 PasswordHash = "x", Role = Roles.Analyst, IsEmailVerified = true,
                 CreatedAt = DateTime.UtcNow.AddDays(-30),
             });
