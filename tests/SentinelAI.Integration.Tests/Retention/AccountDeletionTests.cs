@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using SentinelAI.Application.Abstractions.Billing;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
 using SentinelAI.Domain.Enums;
@@ -61,8 +62,9 @@ public sealed class AccountDeletionTests : IAsyncLifetime
         return new SentinelDbContext(options, new FakeCallerContext { TenantId = null });
     }
 
-    private static TenantPurgeService PurgeFor(SentinelDbContext db, IBundleStore store) =>
-        new(db, store, NullLogger<TenantPurgeService>.Instance);
+    private static TenantPurgeService PurgeFor(
+        SentinelDbContext db, IBundleStore store, IBillingGateway? billing = null) =>
+        new(db, store, billing ?? new RecordingBillingGateway(), NullLogger<TenantPurgeService>.Instance);
 
     /// <summary>
     /// One row in every tenant-owned table, wired together the way a real scan leaves them —
@@ -143,6 +145,20 @@ public sealed class AccountDeletionTests : IAsyncLifetime
             Id = Guid.CreateVersion7(), TenantId = tenantId, ScanJobId = job.Id,
             Summary = "draft", Framing = "draft_audit", Retained = true, CreatedAt = DateTime.UtcNow,
         };
+        // A tenant that has paid for something. Seeded here rather than in a billing-only test
+        // because the assertions above sweep every ITenantOwned entity by reflection: a
+        // subscription row that TenantPurgeService forgot would survive account deletion
+        // forever, holding the customer email and the Stripe ids of a deleted account.
+        var subscription = new Subscription
+        {
+            Id = Guid.CreateVersion7(), TenantId = tenantId,
+            PlanId = "team", Period = BillingPeriod.Monthly, Status = SubscriptionStatus.Active,
+            Quantity = 1,
+            // Unique per tenant: StripeCustomerId carries a filtered unique index, so two
+            // seeded tenants sharing a literal would collide before the purge under test ran.
+            StripeCustomerId = $"cus_{tenantId:N}", StripeSubscriptionId = $"sub_{tenantId:N}",
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+        };
         var citation = new Citation
         {
             Id = Guid.CreateVersion7(), TenantId = tenantId, ReportId = report.Id,
@@ -162,9 +178,43 @@ public sealed class AccountDeletionTests : IAsyncLifetime
         db.ChainHops.Add(hop);
         db.Reports.Add(report);
         db.Citations.Add(citation);
+        db.Subscriptions.Add(subscription);
 
         await db.SaveChangesAsync();
         return job.Id;
+    }
+
+    [Fact]
+    public async Task Deleting_an_account_cancels_its_Stripe_subscription()
+    {
+        // Otherwise the card keeps being charged for an account that no longer exists — and
+        // after the purge there is no row left anywhere that would ever notice.
+        await SeedFullTenantAsync(Victim);
+        var billing = new RecordingBillingGateway();
+
+        await using (var db = NewContext())
+            await PurgeFor(db, new RecordingBundleStore(), billing).PurgeAsync(Victim);
+
+        Assert.Equal([$"sub_{Victim:N}"], billing.Cancelled);
+    }
+
+    [Fact]
+    public async Task A_Stripe_failure_does_not_stop_the_account_being_deleted()
+    {
+        // SEC-35's promise is that an account can be deleted. Making that conditional on a third
+        // party being reachable would mean a Stripe outage leaves a customer unable to delete
+        // their own data — the worse of the two failures. See TenantPurgeService.CancelBillingAsync.
+        await SeedFullTenantAsync(Victim);
+
+        await using (var db = NewContext())
+        {
+            await PurgeFor(db, new RecordingBundleStore(), new RecordingBillingGateway(throwOnCancel: true))
+                .PurgeAsync(Victim);
+        }
+
+        await using var check = NewContext();
+        Assert.Null(await check.Tenants.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Id == Victim));
+        Assert.Empty(await check.Subscriptions.IgnoreQueryFilters().Where(s => s.TenantId == Victim).ToListAsync());
     }
 
     [Fact]
@@ -305,6 +355,36 @@ public sealed class AccountDeletionTests : IAsyncLifetime
             throw new NotSupportedException();
 
         public Task<IReadOnlyList<StoredBundleFile>> OpenGraphInputsAsync(string locator, CancellationToken ct) =>
+            throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// A billing gateway that only remembers which subscriptions it was told to cancel, and can
+    /// be made to fail on demand.
+    /// </summary>
+    private sealed class RecordingBillingGateway(bool throwOnCancel = false) : IBillingGateway
+    {
+        public List<string> Cancelled { get; } = [];
+
+        public Task CancelSubscriptionAsync(string subscriptionId, CancellationToken ct = default)
+        {
+            Cancelled.Add(subscriptionId);
+
+            return throwOnCancel
+                ? Task.FromException(new BillingGatewayException("Stripe is unreachable"))
+                : Task.CompletedTask;
+        }
+
+        public Task<string> GetOrCreateCustomerAsync(
+            Guid tenantId, string email, string? existingCustomerId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<string> CreateCheckoutSessionAsync(
+            CheckoutSessionRequest request, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<string> CreatePortalSessionAsync(
+            string customerId, string returnUrl, CancellationToken ct = default) =>
             throw new NotSupportedException();
     }
 }

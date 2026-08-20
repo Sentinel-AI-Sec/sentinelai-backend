@@ -39,6 +39,7 @@ namespace SentinelAI.Infrastructure.Data
         public DbSet<Citation> Citations { get; set; }
         public DbSet<RuleMapping> RuleMappings { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
+        public DbSet<Subscription> Subscriptions { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

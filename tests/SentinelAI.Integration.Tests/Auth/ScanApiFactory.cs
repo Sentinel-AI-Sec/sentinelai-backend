@@ -56,7 +56,9 @@ namespace SentinelAI.Integration.Tests.Auth;
 /// and nullability — which is the whole reason for the change.
 /// </para>
 /// </remarks>
-public sealed class ScanApiFactory : WebApplicationFactory<Program>
+// Not sealed: BillingApiFactory extends this host with Stripe configuration and a fake gateway.
+// Everything above — real auth middleware, real query filter, SQLite — is what it wants to reuse.
+public class ScanApiFactory : WebApplicationFactory<Program>
 {
     public const string JwtIssuer = "sentinelai-tests";
     public const string JwtAudience = "sentinelai-tests-audience";

@@ -2,10 +2,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SentinelAI.Application.Abstractions;
+using SentinelAI.Application.Abstractions.Billing;
 using SentinelAI.Application.Features.Scan.Security;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
 using SentinelAI.Infrastructure.Agents;
+using SentinelAI.Infrastructure.Billing;
 using SentinelAI.Infrastructure.Data;
 using SentinelAI.Infrastructure.Graph;
 using SentinelAI.Infrastructure.Knowledge;
@@ -166,6 +168,24 @@ public static class DependencyInjection
         services.AddScoped<IScanJobRepository, ScanJobRepository>();
         services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
         services.AddScoped<IUnitOfWork, UnitOfWork>();
+
+        // ---- Billing: subscriptions through Stripe Checkout -------------------------------
+        // Vendor-neutral above this line: Application takes IBillingGateway and
+        // IBillingEventReader, so the checkout, portal and webhook handlers are testable with a
+        // fake and no Stripe account. StripeBillingGateway is the only class that calls Stripe.
+        //
+        // BillingSettings is a singleton read once at registration, the same shape EgressPolicy
+        // uses: Infrastructure owns configuration, Application gets a settled answer. Registering
+        // it unconditionally matters — a deployment with no Stripe account is a supported state,
+        // and the endpoints answer 503 with an honest reason rather than failing to resolve.
+        services.Configure<StripeOptions>(configuration.GetSection(StripeOptions.SectionName));
+        services.AddSingleton(_ => BillingSettingsLoader.Load(configuration));
+        services.AddScoped<IBillingGateway, StripeBillingGateway>();
+        services.AddScoped<IBillingEventReader, StripeEventReader>();
+
+        // The one place tenant isolation is stepped around for billing. See the interface for
+        // why the webhook cannot run under the query filter and why this is safe.
+        services.AddScoped<IBillingSubscriptionStore, BillingSubscriptionStore>();
 
         // ---- Auth: login/register --------------------------------------------------------
         services.AddScoped<IUserRepository, UserRepository>();
