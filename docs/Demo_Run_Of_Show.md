@@ -30,7 +30,7 @@ Both are in the run-of-show below, in that order, and the difference is stated o
 |---|---|---|
 | `sentinelai-action` on `dev`, pushed | The delivery leg lives there | `git -C sentinelai-action log --oneline -1` |
 | `sentinelai-fixtures` checked out | The fixture PR's repository | `ls sentinelai-fixtures/scan_out` |
-| A deployed backend | Or `dotnet run` locally, see below | `curl -i $API/v1/scans` → **405** |
+| A deployed backend | Or `dotnet run` locally, see below | `curl -i $API/v1/health` → **200** |
 | A live model provider | Scripted produces canned turns — real, and unimpressive | `SentinelAI:Models:Provider` |
 | A corpus | Or the report's citations come from `SeedKnowledgeRetriever` | `Knowledge:Endpoint` set |
 | The UI pointed at the backend | `useDemoData: false`, or `ng serve` with the proxy | |
