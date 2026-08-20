@@ -1,0 +1,7 @@
+[
+  { "tool": "sentinelai", "project": "terragoat", "file": "infra/iam.tf", "line": 25, "category": "CWE-284", "rule_id": "CKV_AWS_290" },
+  { "tool": "sentinelai", "project": "terragoat", "file": "infra/iam.tf", "line": 61, "category": "CWE-284", "rule_id": "CKV_AWS_60" },
+  { "tool": "sentinelai", "project": "terragoat", "file": "infra/s3.tf", "line": 1, "category": "CWE-778", "rule_id": "CKV_AWS_18" },
+  { "tool": "sentinelai", "project": "terragoat", "file": "src/App/OrdersController.cs", "line": 41, "category": "CWE-502", "rule_id": "SCS0028" },
+  { "tool": "sentinelai", "project": "terragoat", "file": "infra/main.tf", "line": 7, "category": "CWE-311", "rule_id": "CKV_AWS_19" }
+]

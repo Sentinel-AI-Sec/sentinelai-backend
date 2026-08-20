@@ -1,0 +1,5 @@
+{
+  "name": "sentinelai-benchmark-sample",
+  "version": "v0 (worked example, not the SEC-38 corpus)",
+  "note": "Six labels over one project, enough to see the report's shape and to prove the runner reads both results formats. The real corpus lives in sentinelai-fixtures and is far larger."
+}
