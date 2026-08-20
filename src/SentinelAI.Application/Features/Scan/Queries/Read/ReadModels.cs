@@ -226,10 +226,47 @@ public sealed record ChainView
         HopCount = chain.HopCount,
         Status = Wire.Of(chain.Status),
         MinConfidence = Wire.Of(chain.MinConfidence),
-        Hops = [.. chain.ChainHops
-            .OrderBy(h => h.HopOrder)
-            .Select(h => ChainHopView.From(h, nodeKeysById))],
+        Hops = HopsOf(chain, nodeKeysById),
     };
+
+    /// <summary>
+    /// The chain's hops in order, each carrying the node it stands on — including the seed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The seed hop has no edge, and its node key is not recoverable from the row alone.</b>
+    /// A hop names its node through <c>edge.to_node_id</c>, which works for every hop the
+    /// traversal stepped into and not for hop 0, which arrived from nowhere — <c>edge_id</c> is
+    /// null there by design. Read hop-by-hop, the seed's key therefore came back null and the
+    /// chain served on the wire began one hop late.
+    /// </para>
+    /// <para>
+    /// That is not cosmetic. The seed is the finding the chain <em>starts</em> from — the
+    /// vulnerable package in the flagship chain — so every path the dashboard drew was missing
+    /// the dependency layer, and a three-layer claim was rendered as two. Nothing failed:
+    /// the graph stage's own response carries the full path, so the two halves disagreed while
+    /// each was individually green. SEC-49's harness is what put them side by side.
+    /// </para>
+    /// <para>
+    /// The fix needs the sibling hop rather than more columns: hop 0's node is where hop 1's
+    /// edge comes <em>from</em>. That is exact, not inferred — the traversal built the two
+    /// together — and it stays correct if hops are ever renumbered, because it reads the next
+    /// hop in order rather than assuming the number 1.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<ChainHopView> HopsOf(Chain chain, IReadOnlyDictionary<Guid, string> nodeKeysById)
+    {
+        var ordered = chain.ChainHops.OrderBy(h => h.HopOrder).ToList();
+
+        return
+        [
+            .. ordered.Select((hop, index) => ChainHopView.From(
+                hop,
+                nodeKeysById,
+                // Only ever consulted when this hop has no edge of its own.
+                nextHop: index + 1 < ordered.Count ? ordered[index + 1] : null)),
+        ];
+    }
 }
 
 public sealed record ChainHopView
@@ -281,9 +318,18 @@ public sealed record ChainHopView
     /// <summary>Null where the hop is a place on a path that carries no scanner finding.</summary>
     [JsonPropertyName("finding_id")] public string? FindingId { get; init; }
 
+    /// <summary>
+    /// The node this hop stands on. Null only when the graph rows it would be read from are
+    /// missing, which is a broken chain rather than a normal one.
+    /// </summary>
     [JsonPropertyName("node_key")] public string? NodeKey { get; init; }
 
-    public static ChainHopView From(ChainHop hop, IReadOnlyDictionary<Guid, string> nodeKeysById) => new()
+    /// <param name="nextHop">
+    /// The hop after this one, when there is one. Consulted only for the seed hop, whose own
+    /// row cannot name its node — see <see cref="ChainView.HopsOf"/>.
+    /// </param>
+    public static ChainHopView From(
+        ChainHop hop, IReadOnlyDictionary<Guid, string> nodeKeysById, ChainHop? nextHop = null) => new()
     {
         Order = hop.HopOrder,
         TechniqueId = hop.TechniqueId,
@@ -291,8 +337,23 @@ public sealed record ChainHopView
         BlueVerdict = Wire.Of(hop.BlueVerdict),
         EdgeConfidence = hop.Edge is { } edge ? Wire.Of(edge.Confidence) : null,
         FindingId = hop.FindingId?.ToString(),
-        NodeKey = hop.Edge is { } e && nodeKeysById.TryGetValue(e.ToNodeId, out var key) ? key : null,
+        NodeKey = NodeKeyOf(hop, nextHop, nodeKeysById),
     };
+
+    /// <summary>
+    /// A hop's node: where its own edge arrives, or — for the seed — where the next hop's edge
+    /// departs from.
+    /// </summary>
+    private static string? NodeKeyOf(
+        ChainHop hop, ChainHop? nextHop, IReadOnlyDictionary<Guid, string> nodeKeysById)
+    {
+        if (hop.Edge is { } edge)
+            return nodeKeysById.TryGetValue(edge.ToNodeId, out var key) ? key : null;
+
+        return nextHop?.Edge is { } outgoing && nodeKeysById.TryGetValue(outgoing.FromNodeId, out var seed)
+            ? seed
+            : null;
+    }
 }
 
 // ---- GET /v1/reports/{id} --------------------------------------------------------------
