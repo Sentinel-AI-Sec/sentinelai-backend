@@ -184,9 +184,16 @@ jobs:
           echo "No secrets files tracked."
 
       - name: Fail if an API key literal was committed
-        # Provider key prefixes: nvapi- (NVIDIA NIM), sk-ant- (Anthropic), sk- (OpenAI).
+        # Provider key prefixes: nvapi- (NVIDIA NIM), sk-ant- (Anthropic), sk- (OpenAI), and the
+        # Stripe family.
+        #
+        # Stripe's separator is an UNDERSCORE (sk_test_..., whsec_...), so the sk-[A-Za-z0-9]{32,}
+        # pattern above does not match a single one of them — a leaked Stripe key would have
+        # shipped through this gate green. sk/rk are API keys, whsec is a webhook signing secret,
+        # and the signing secret is the more dangerous of the two here: it is what proves a
+        # webhook came from Stripe, so anyone holding it can forge any plan change in the product.
         run: |
-          hits=$(git grep -nIE '(nvapi-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,})' \
+          hits=$(git grep -nIE '(nvapi-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,}|(sk|rk)_(test|live)_[A-Za-z0-9]{16,}|whsec_[A-Za-z0-9]{16,})' \
                  -- . ':(exclude).github/workflows/*' || true)
           if [ -n "$hits" ]; then
             echo "::error::Possible API key committed:"
