@@ -49,6 +49,28 @@ internal static class ReadGuard
 
         return (null, tenantId);
     }
+
+    /// <summary>
+    /// Confirms the caller may read, without naming a particular resource. For the list endpoints,
+    /// which have no id to check ownership of — the tenant they return <em>is</em> the answer.
+    /// </summary>
+    /// <remarks>
+    /// Split out rather than folded into <see cref="AuthorizeScanAsync"/> with a nullable id, so
+    /// that the per-resource ownership check cannot be skipped by passing null. A guard that does
+    /// less when an argument is absent is a guard someone will eventually call with the argument
+    /// absent by accident.
+    /// </remarks>
+    public static async Task<(Response? Failure, Guid TenantId)> AuthorizeTenantAsync(
+        ICallerContext caller, string scope)
+    {
+        if (!caller.IsAuthenticated || caller.TenantId is null)
+            return (await Response.FailureAsync("a valid token is required", HttpStatusCode.Unauthorized), Guid.Empty);
+
+        if (!caller.HasScope(scope))
+            return (await Response.FailureAsync($"the '{scope}' scope is required", HttpStatusCode.Forbidden), Guid.Empty);
+
+        return (null, caller.TenantId.Value);
+    }
 }
 
 // ---- bundle ----------------------------------------------------------------------------

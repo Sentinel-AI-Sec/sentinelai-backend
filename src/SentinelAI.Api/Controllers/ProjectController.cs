@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SentinelAI.Application.Features.Project.Commands.Create;
+using SentinelAI.Application.Features.Project.Queries.GetById;
 using SentinelAI.Application.Features.Project.Queries.List;
 using SentinelAI.Domain.Models;
 
@@ -53,6 +54,24 @@ public class ProjectController(ISender sender) : ControllerBase
     public async Task<IActionResult> List(CancellationToken ct)
     {
         var response = await sender.Send(new ListProjectsQuery(), ct);
+        return StatusCode((int)response.StatusCode, response);
+    }
+
+    /// <summary>
+    /// One project by id — the endpoint the API design document's §4 table lists and nothing ever
+    /// implemented.
+    /// </summary>
+    /// <remarks>
+    /// Not redundant with <see cref="List"/>. A scan, a report and the Action's PR comment all
+    /// identify a repository by <c>project_id</c> and carry nothing else about it, so a screen
+    /// that starts from one of those either resolves the id here or downloads every project the
+    /// tenant owns to find a single row. Another tenant's project answers <c>404</c>, the same
+    /// answer as an id that does not exist.
+    /// </remarks>
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
+    {
+        var response = await sender.Send(new GetProjectQuery(id), ct);
         return StatusCode((int)response.StatusCode, response);
     }
 }
