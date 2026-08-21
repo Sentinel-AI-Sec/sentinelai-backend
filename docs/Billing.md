@@ -147,6 +147,27 @@ holds the `created` timestamp of the last state-bearing event applied; anything 
 acknowledged and dropped. Without it, a customer who upgrades can appear minutes later to be back
 on the plan they left, with Stripe showing the right answer the whole time.
 
+> **The comparison is strictly older (`<`), and tightening it to `<=` breaks checkout silently.**
+>
+> Stripe stamps `created` to the **second**, and a single purchase fires eight or nine events
+> inside the same second — `invoice.paid`, `customer.subscription.created`,
+> `invoice.payment_succeeded` and the rest. Rejecting equal timestamps therefore lets exactly one
+> event per second through: whichever arrives first claims the watermark and every sibling is
+> discarded as stale.
+>
+> This is not hypothetical. A live test-mode purchase delivered `invoice.paid` ahead of
+> `customer.subscription.created`, so the event carrying the price was dropped and the account read
+> as a completed payment against no plan — while all eight deliveries logged a satisfied `200` and
+> the Stripe dashboard showed everything green. Nothing about the failure looks like a failure.
+>
+> What `<` gives up is ordering *within* one second, which second-resolution timestamps cannot
+> express anyway. What it keeps is the guard that matters: a retry redelivered seconds or minutes
+> later cannot walk the row backwards.
+>
+> For the same reason, an event that changed nothing must not advance the watermark —
+> `checkout.session.completed` deliberately does not, and neither should any future handler that
+> writes no state.
+
 ### API version drift
 
 `EventUtility.ConstructEvent` is called with `throwOnApiVersionMismatch: false`. That comparison is

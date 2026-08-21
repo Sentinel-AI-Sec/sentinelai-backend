@@ -39,6 +39,18 @@ namespace SentinelAI.Api.Controllers;
 public class BillingController(ISender sender) : ControllerBase
 {
     /// <summary>
+    /// The largest webhook body this endpoint will read.
+    /// </summary>
+    /// <remarks>
+    /// Stripe's events are a few kilobytes. This is a bound on the one endpoint in the API that,
+    /// by necessity, buffers bytes from an unauthenticated caller <em>before</em> it can verify
+    /// anything about them — the signature cannot be checked until the whole body has been read,
+    /// so without a limit the check that makes this endpoint safe is also what makes it a place to
+    /// post arbitrarily large bodies.
+    /// </remarks>
+    private const int MaxWebhookBytes = 256 * 1024;
+
+    /// <summary>
     /// What the caller's own organisation is subscribed to.
     /// </summary>
     /// <remarks>
@@ -102,6 +114,7 @@ public class BillingController(ISender sender) : ControllerBase
     /// </remarks>
     [HttpPost("webhook")]
     [AllowAnonymous]
+    [RequestSizeLimit(MaxWebhookBytes)]
     public async Task<IActionResult> Webhook(CancellationToken ct)
     {
         // Left open: disposing this reader would dispose the request body stream, which the
