@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using SentinelAI.Application.Abstractions;
+using SentinelAI.Application.Debate;
 using SentinelAI.Domain.Models;
 
 namespace SentinelAI.Api.Controllers;
@@ -95,7 +96,7 @@ public sealed record DebateResponse
             Turns = audit.Transcript.Count,
             TerminatedByTurnCap = audit.TerminatedByTurnCap,
             Summary = audit.Summary,
-            Transcript = [.. audit.Transcript.Select(TurnView.From)],
+            Transcript = [.. audit.Transcript.Select(t => TurnView.From(t, brief.Context))],
             Disclaimer = audit.Disclaimer,
             EdgeIntegrityWarnings = audit.EdgeIntegrityWarnings,
             AbandonedReasoningWarnings = audit.AbandonedReasoningWarnings,
@@ -103,12 +104,31 @@ public sealed record DebateResponse
         };
 
     /// <param name="Tier">Which tier the turn was routed to — <c>High</c> or <c>Cheap</c>.</param>
+    /// <param name="Content">
+    /// The turn exactly as the agent wrote it, after <c>TranscriptText.Clean</c> removed the
+    /// scratchpad and the markdown. Still sent in full even when <paramref name="Display"/> is
+    /// populated: the structure is a reading of this text, and a reading a caller cannot check
+    /// against the original is one it has to take on faith.
+    /// </param>
+    /// <param name="Display">
+    /// The same turn taken apart into what it claimed — the hops with the graph's own node
+    /// names, Blue's verdict on each, the grounded ATT&amp;CK id, and the deterministic edge
+    /// check's answer. Every field may be empty; all of them empty means the agent wrote prose
+    /// that could not be structured, and the caller should render <paramref name="Content"/>
+    /// alone. See <see cref="TurnPresenter"/>.
+    /// </param>
     public sealed record TurnView(
-        string Role, int Round, string Confidence, string Tier, long Tokens, string Content)
+        string Role,
+        int Round,
+        string Confidence,
+        string Tier,
+        long Tokens,
+        string Content,
+        TurnDisplay Display)
     {
-        public static TurnView From(DebateTurn t) =>
+        public static TurnView From(DebateTurn t, string briefContext) =>
             new(t.Role.ToString(), t.Round, t.Confidence.ToString(), t.Tier.ToString(),
-                t.Usage.TotalTokens, t.Content);
+                t.Usage.TotalTokens, t.Content, TurnPresenter.Present(briefContext, t));
     }
 
     /// <summary>

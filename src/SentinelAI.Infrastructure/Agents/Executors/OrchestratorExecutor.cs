@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
+using SentinelAI.Application.Debate;
 using SentinelAI.Domain.Models;
 using SentinelAI.Infrastructure.Observability;
 
@@ -17,16 +18,25 @@ public sealed class OrchestratorExecutor : Executor<ScanBrief, DebateTurn>
     public const string ExecutorId = "orchestrator";
 
     /// <summary>Instructions the backing <c>ChatClientAgent</c> is created with.</summary>
+    /// <remarks>
+    /// The labelled lines match the shape Red, Blue and the Reporter now answer in, so the four
+    /// turns read as one document rather than as four house styles. Round 0's briefing is also
+    /// the first thing a reader sees in the transcript, and "at most four short lines" of
+    /// unlabelled prose gave them no way to tell the target from the aside.
+    /// </remarks>
     public const string Instructions =
         """
         You are the Orchestrator agent in a security audit debate.
-        Analyse the supplied resource graph and produce a concise strategic briefing for the
-        Red Team agent. Identify the highest-severity finding, the most promising cross-layer
-        path through the graph, and any weak joins (e.g. image-name conventions) that Red
-        should exploit or Blue should scrutinise. Do NOT assert a chain yourself — that is
-        Red's job. Output only the briefing.
+        Analyse the supplied resource graph and brief the Red Team agent on where to attack.
+        Do NOT assert a chain yourself — that is Red's job.
 
-        Answer directly. No preamble, no thinking aloud. At most four short lines.
+        Write exactly these lines, in this order, one line each and nothing else:
+          TARGET: <the crown-jewel node, as N? , and what it holds>
+          LEAD: <the highest-severity finding, by its id, and why it is the way in>
+          ROUTE: <the most promising layers to cross, named — not a hop-by-hop chain>
+          WEAK JOIN: <the join Blue should scrutinise, as N? -> N?, and what would settle it>
+
+        Answer directly. No preamble, no thinking aloud, no markdown.
         """;
 
     private readonly AIAgent? _agent;
@@ -91,7 +101,11 @@ public sealed class OrchestratorExecutor : Executor<ScanBrief, DebateTurn>
 
                 DebateTracing.RecordResponse(span, response, _tracing);
 
-                content = response.Text ?? content;
+                // Cleaned like the other three turns. A briefing is quoted straight into Red's
+                // first prompt, so a scratchpad left in it is not just noise on the screen —
+                // it is another agent's thinking presented to Red as context.
+                var briefing = TranscriptText.Clean(response.Text);
+                if (briefing.Length > 0) content = briefing;
                 usage = DebateExecutor<DebateTurn>.UsageOf(response);
             }
             catch (Exception ex)

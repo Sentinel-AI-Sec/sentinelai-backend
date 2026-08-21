@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using SentinelAI.Application.Debate;
 using SentinelAI.Domain.Models;
+using SentinelAI.Infrastructure.Agents.Executors;
 using SentinelAI.Infrastructure.Agents.Providers;
 
 namespace SentinelAI.Integration.Tests.Agents;
@@ -134,16 +135,29 @@ public class ProviderSwitchTests
     // via ChatOptions.Instructions instead. Every agent then returned the same fallback
     // string. The unit tests missed it - only running the demo exposed it.
     [Theory]
-    [InlineData(AgentRole.Red, "ASSERT")]
-    [InlineData(AgentRole.Blue, "VALIDATE")]
-    [InlineData(AgentRole.Reporter, "ADJUDICATE")]
+    [InlineData(AgentRole.Red, "IMPACT:")]
+    [InlineData(AgentRole.Blue, BlueTeamExecutor.HoldsVerdict)]
+    [InlineData(AgentRole.Reporter, "SEVERITY:")]
     public async Task The_scripted_client_answers_in_character_for_each_role(AgentRole role, string expected)
     {
         var client = new ChatClientFactory(new ModelProviderOptions()).Create(role, ModelTier.High);
 
         var response = await client.GetResponseAsync([new ChatMessage(ChatRole.User, "go")]);
 
-        Assert.StartsWith(expected, response.Text);
+        Assert.Contains(expected, response.Text);
+    }
+
+    /// <summary>
+    /// The other half of the regression above, and the half a marker check alone would miss:
+    /// all four roles now open with the same labelled-line style, so "in character" has to mean
+    /// four different turns, not four turns that happen to contain four different words.
+    /// </summary>
+    [Fact]
+    public void No_two_roles_share_a_canned_turn()
+    {
+        var turns = Enum.GetValues<AgentRole>().Select(ScriptedChatClient.CannedTurnFor).ToList();
+
+        Assert.Equal(turns.Count, turns.Distinct(StringComparer.Ordinal).Count());
     }
 
     [Fact]

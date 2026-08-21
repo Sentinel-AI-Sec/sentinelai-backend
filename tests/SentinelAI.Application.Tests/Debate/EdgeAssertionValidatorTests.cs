@@ -100,6 +100,40 @@ public class EdgeAssertionValidatorTests
         Assert.Empty(EdgeAssertionValidator.Validate(ThreeNodeBrief, ""));
     }
 
+    /// <summary>
+    /// <c>ScanBrief.Stub</c> — the fixture behind the demo endpoint and every offline run —
+    /// writes its edges with a unicode arrow rather than the <c>--relation--&gt;</c> form
+    /// <c>ScanBriefRenderer</c> uses. Only the latter was ever matched, so this check found no
+    /// real edges in that brief and returned nothing at all: not "the chain is clean", but no
+    /// check having run on the one brief anybody demonstrates the product with.
+    /// </summary>
+    [Fact]
+    public void The_unicode_arrow_edge_section_is_read_as_real_edges()
+    {
+        const string arrowBrief =
+            """
+            RESOURCE GRAPH
+
+            Nodes: N1=code:orderapp | N2=iam_role:order_task_role | N3=s3:customer_data
+
+            Edges (as emitted by the extractors — some over-approximate):
+              N1→N2: deployed-as  INFERRED  a name convention, not a digest
+              N2→N3: can-access   CERTAIN   see F4
+            """;
+
+        Assert.Equal(
+            EdgeAssertionValidator.HopStatus.Confirmed,
+            Assert.Single(EdgeAssertionValidator.Validate(arrowBrief, "N1 -> deployed-as -> N2")).Status);
+
+        Assert.Equal(
+            EdgeAssertionValidator.HopStatus.Reversed,
+            Assert.Single(EdgeAssertionValidator.Validate(arrowBrief, "N3 -> can-access -> N2")).Status);
+
+        Assert.Equal(
+            EdgeAssertionValidator.HopStatus.Unrecognized,
+            Assert.Single(EdgeAssertionValidator.Validate(arrowBrief, "N1 -> reaches -> N3")).Status);
+    }
+
     [Fact]
     public void A_brief_with_no_edges_section_yields_no_findings()
     {

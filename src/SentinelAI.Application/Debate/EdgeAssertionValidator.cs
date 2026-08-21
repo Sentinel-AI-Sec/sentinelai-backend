@@ -41,6 +41,26 @@ public static class EdgeAssertionValidator
     private static readonly Regex RenderedEdge = new(
         @"\bN(?<from>\d+)\s*--[^>]*-->\s*N(?<to>\d+)", RegexOptions.Compiled);
 
+    /// <summary>
+    /// The other spelling a brief's edge section uses: <c>  N1→N2: used-by   CERTAIN   …</c>.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ScanBrief.Stub"/> — the fixture behind <c>POST /v1/debates/demo</c> and every
+    /// offline run — writes its edges this way, and only <see cref="RenderedEdge"/> was ever
+    /// matched. So <see cref="ParseRealEdges"/> found nothing in it, and <see cref="Validate"/>
+    /// returned no findings at all: the one deterministic check in the system was silently
+    /// inert on the one brief anybody demonstrates it with. Not a missing warning — no check.
+    /// <para>
+    /// Widening what counts as a <em>real</em> edge is safe in a way widening
+    /// <see cref="AsciiArrow"/> — what counts as an <em>asserted</em> one — is not. An
+    /// unrecognised real edge can only produce a warning about a hop that is in fact fine;
+    /// recognising it can only remove one. The asserted side decides whether a chain is capped,
+    /// which is why it stays narrow.
+    /// </para>
+    /// </remarks>
+    private static readonly Regex UnicodeArrowEdge = new(
+        @"\bN(?<from>\d+)\s*→\s*N(?<to>\d+)", RegexOptions.Compiled);
+
     /// <summary>Matches the brief's own node list entry: <c>N65=code:orderapp</c>, optionally followed by <c> HOT</c>.</summary>
     private static readonly Regex NodeLabelDeclaration = new(
         @"\bN(?<index>\d+)=(?<label>[^\s|]+)", RegexOptions.Compiled);
@@ -254,11 +274,14 @@ public static class EdgeAssertionValidator
     {
         var edges = new HashSet<(int, int)>();
 
-        foreach (Match m in RenderedEdge.Matches(briefContext))
+        foreach (var pattern in new[] { RenderedEdge, UnicodeArrowEdge })
         {
-            if (int.TryParse(m.Groups["from"].Value, out var from) &&
-                int.TryParse(m.Groups["to"].Value, out var to))
-                edges.Add((from, to));
+            foreach (Match m in pattern.Matches(briefContext))
+            {
+                if (int.TryParse(m.Groups["from"].Value, out var from) &&
+                    int.TryParse(m.Groups["to"].Value, out var to))
+                    edges.Add((from, to));
+            }
         }
 
         return edges;

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using SentinelAI.Application.Debate;
 using SentinelAI.Domain.Models;
+using SentinelAI.Infrastructure.Agents.Executors;
 using SentinelAI.Infrastructure.Agents.Orchestration;
 using SentinelAI.Infrastructure.Agents.Providers;
 
@@ -75,9 +76,11 @@ public class ProviderDebateTests
             [AgentRole.Red, AgentRole.Blue, AgentRole.Reporter],
             result.Audit!.Transcript.Select(t => t.Role));
 
-        Assert.Contains("ASSERT", result.Audit.Transcript[0].Content);
-        Assert.Contains("VALIDATE", result.Audit.Transcript[1].Content);
-        Assert.Contains("ADJUDICATE", result.Audit.Summary);
+        // In character, by the marker each role's own instructions mandate and no other role's:
+        // Red asserts hops, Blue closes with the verdict token, the Reporter grades the result.
+        Assert.Contains("HOP 1:", result.Audit.Transcript[0].Content);
+        Assert.Contains(BlueTeamExecutor.HoldsVerdict, result.Audit.Transcript[1].Content);
+        Assert.Contains("SEVERITY:", result.Audit.Summary);
 
         Assert.True(result.Audit.Converged);
         Assert.False(result.Audit.TerminatedByTurnCap);
