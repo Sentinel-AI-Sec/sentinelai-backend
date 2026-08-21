@@ -26,6 +26,8 @@ using SentinelAI.Infrastructure.Knowledge;
 using SentinelAI.Infrastructure.Normalization;
 using SentinelAI.Infrastructure.Security;
 
+using SentinelAI.Integration.Tests.Scan;
+
 namespace SentinelAI.Integration.Tests.Scan.Orchestration;
 
 /// <summary>
@@ -265,6 +267,7 @@ public sealed class ScanPipelineRunnerTests : IDisposable
                 Options.Create(new DebateOptions { MaxRounds = 2 })),
             new ReportBuilder(),
             retention,
+            new FakeTenantEntitlements(),
             NullLogger<ThinSlicePipeline>.Instance);
 
         var log = new RecordingLogger<ScanPipelineRunner>();

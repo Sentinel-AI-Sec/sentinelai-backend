@@ -40,6 +40,7 @@ namespace SentinelAI.Infrastructure.Data
         public DbSet<RuleMapping> RuleMappings { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
         public DbSet<Subscription> Subscriptions { get; set; }
+        public DbSet<ScanQuotaCounter> ScanQuotaCounters { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

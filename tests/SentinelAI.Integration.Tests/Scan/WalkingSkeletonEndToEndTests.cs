@@ -61,6 +61,7 @@ public class WalkingSkeletonEndToEndTests
             RealDebateOffline(),
             new ReportBuilder(),
             new FakeScanRetentionPolicy(),
+            new FakeTenantEntitlements(),
             NullLogger<ThinSlicePipeline>.Instance);
 
     private static Finding SeededFinding() => new()

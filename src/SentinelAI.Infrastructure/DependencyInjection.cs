@@ -199,6 +199,11 @@ public static class DependencyInjection
         // why the webhook cannot run under the query filter and why this is safe.
         services.AddScoped<IBillingSubscriptionStore, BillingSubscriptionStore>();
 
+        // What a plan grants, and the meter that enforces the part of it that is countable.
+        // Scoped: both read per-request state and the counter writes.
+        services.AddScoped<ITenantEntitlements, TenantEntitlements>();
+        services.AddScoped<IScanQuotaCounter, ScanQuotaCounterStore>();
+
         // ---- Auth: login/register --------------------------------------------------------
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();

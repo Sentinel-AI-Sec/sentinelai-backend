@@ -235,6 +235,14 @@ public sealed class ChainOutcomeWriter(IUnitOfWork unitOfWork, ILogger<ChainOutc
             DebateOutcome.ChainBroken => ChainStatus.Rejected,
             DebateOutcome.TurnCapped => ChainStatus.Asserted,
             DebateOutcome.VerdictUnreadable => ChainStatus.Asserted,
+
+            // No debate ran, so the chain stays exactly where the graph stage left it. Not
+            // Asserted: asserting is something Red does, and on a plan without adjudication Red
+            // never spoke. Belt and braces -- ThinSlicePipeline does not call this writer at all
+            // when adjudication is off -- but the default arm below would otherwise assert, and a
+            // silent assert is the failure mode this whole type exists to avoid.
+            DebateOutcome.NotAdjudicated => ChainStatus.Candidate,
+
             _ => ChainStatus.Asserted,
         };
 

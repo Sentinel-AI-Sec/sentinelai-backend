@@ -34,6 +34,7 @@ public class AttackGraphHandoffWiringTests
             new CapturingDebate(),
             new ReportBuilder(),
             new FakeScanRetentionPolicy(),
+            new FakeTenantEntitlements(),
             NullLogger<ThinSlicePipeline>.Instance);
 
     private static GraphNode Node(NodeType type, string identifier, Layer layer) =>
@@ -176,6 +177,7 @@ public class AttackGraphHandoffWiringTests
             capture,
             new ReportBuilder(),
             new FakeScanRetentionPolicy(),
+            new FakeTenantEntitlements(),
             NullLogger<ThinSlicePipeline>.Instance);
 
         await pipeline.RunAsync([onPath], Tenant, Job, nodes, edges: [edge]);
@@ -205,6 +207,7 @@ public class AttackGraphHandoffWiringTests
             capture,
             new ReportBuilder(),
             new FakeScanRetentionPolicy(),
+            new FakeTenantEntitlements(),
             NullLogger<ThinSlicePipeline>.Instance);
 
         // No graph passed — edges alone, with no real node set behind them, must not leak in.

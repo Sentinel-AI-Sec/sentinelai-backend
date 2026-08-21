@@ -71,23 +71,32 @@ public sealed class ListScansQueryHandler(IUnitOfWork unitOfWork, ICallerContext
 
         if (request.Cursor is { Length: > 0 })
         {
-            if (!Cursor.TryDecode(request.Cursor, out var after))
+            if (!Cursor.TryDecode(request.Cursor, out var afterStarted, out var afterId))
                 return await Response.FailureAsync("the cursor is not valid", HttpStatusCode.BadRequest);
 
-            // '<', not '>', because this list runs newest first. Ids are UUIDv7 and therefore
-            // time-ordered, so "before the last row you saw" and "older than the last row you
-            // saw" are the same predicate — which is the whole reason keyset paging works here.
-            query = query.Where(j => j.Id.CompareTo(after) < 0);
+            // '<', not '>', because this list runs newest first.
+            //
+            // Keyed on StartedAt with the id only as a tiebreak. An earlier version keyed on the
+            // id alone, on the grounds that UUIDv7 is time-ordered — true of the bytes, false of
+            // the sort on SQL Server, whose uniqueidentifier collation reads the trailing node
+            // bytes before the leading timestamp. That made "newest first" arbitrary in
+            // production while looking correct in every test, because the integration suite runs
+            // on the in-memory provider. See Cursor's remarks.
+            query = query.Where(j =>
+                j.StartedAt < afterStarted
+                || (j.StartedAt == afterStarted && j.Id.CompareTo(afterId) < 0));
         }
 
         var rows = await query
             .Include(j => j.Project)
             .Include(j => j.Report)
-            .OrderByDescending(j => j.Id)
+            .OrderByDescending(j => j.StartedAt)
+            .ThenByDescending(j => j.Id)
             .Take(limit + 1)
             .ToListAsync(ct);
 
-        var page = GetFindingsQueryHandler.Page(rows, limit, j => j.Id, ScanListItemView.From);
+        var page = GetFindingsQueryHandler.Page(
+            rows, limit, j => Cursor.Encode(j.StartedAt, j.Id), ScanListItemView.From);
 
         return await Response.SuccessAsync(page, "scans", HttpStatusCode.OK);
     }
@@ -127,21 +136,26 @@ public sealed class ListReportsQueryHandler(IUnitOfWork unitOfWork, ICallerConte
 
         if (request.Cursor is { Length: > 0 })
         {
-            if (!Cursor.TryDecode(request.Cursor, out var after))
+            if (!Cursor.TryDecode(request.Cursor, out var afterCreated, out var afterId))
                 return await Response.FailureAsync("the cursor is not valid", HttpStatusCode.BadRequest);
 
-            query = query.Where(r => r.Id.CompareTo(after) < 0);
+            // Keyed on CreatedAt for the same reason the scan list is keyed on StartedAt.
+            query = query.Where(r =>
+                r.CreatedAt < afterCreated
+                || (r.CreatedAt == afterCreated && r.Id.CompareTo(afterId) < 0));
         }
 
         var rows = await query
             .Include(r => r.ScanJob)
                 .ThenInclude(j => j!.Project)
-            .OrderByDescending(r => r.Id)
+            .OrderByDescending(r => r.CreatedAt)
+            .ThenByDescending(r => r.Id)
             .Take(limit + 1)
             .ToListAsync(ct);
 
         var page = GetFindingsQueryHandler.Page(
-            rows, limit, r => r.Id, r => ReportListItemView.From(r, r.ScanJob));
+            rows, limit, r => Cursor.Encode(r.CreatedAt, r.Id),
+            r => ReportListItemView.From(r, r.ScanJob));
 
         return await Response.SuccessAsync(page, "draft audits", HttpStatusCode.OK);
     }

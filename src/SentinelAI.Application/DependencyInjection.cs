@@ -15,6 +15,10 @@ public static class DependencyInjection
         services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
 
+        // After validation, and the order matters: registration order is execution order, so a
+        // malformed submission is refused as a 400 before it can spend a customer's daily quota.
+        services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ScanQuotaBehavior<,>));
+
         services.AddScoped<AuthTokenFactory>();
 
         // SEC-14: the Normalize stage. Its IFindingExtractor set is supplied by Infrastructure.

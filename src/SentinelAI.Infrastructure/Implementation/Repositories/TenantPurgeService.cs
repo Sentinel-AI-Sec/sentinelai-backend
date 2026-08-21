@@ -88,6 +88,7 @@ public sealed class TenantPurgeService(
             rows[nameof(Project)] = await DeleteAsync<Project>(tenantId, ct);
             rows[nameof(RefreshToken)] = await DeleteAsync<RefreshToken>(tenantId, ct);
             rows[nameof(Subscription)] = await DeleteAsync<Subscription>(tenantId, ct);
+            rows[nameof(ScanQuotaCounter)] = await DeleteAsync<ScanQuotaCounter>(tenantId, ct);
             rows[nameof(User)] = await DeleteAsync<User>(tenantId, ct);
 
             // The tenant itself last: it is what everything above hung from.

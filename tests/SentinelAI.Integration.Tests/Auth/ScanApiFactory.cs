@@ -8,11 +8,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using SentinelAI.Application.Abstractions;
+using SentinelAI.Application.Abstractions.Billing;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Models;
 using SentinelAI.Infrastructure.Agents.Providers;
 using SentinelAI.Infrastructure.Data;
 using SentinelAI.Infrastructure.Knowledge;
+using SentinelAI.Integration.Tests.Scan;
 
 namespace SentinelAI.Integration.Tests.Auth;
 
@@ -63,6 +65,12 @@ public class ScanApiFactory : WebApplicationFactory<Program>
     public const string JwtIssuer = "sentinelai-tests";
     public const string JwtAudience = "sentinelai-tests-audience";
     public const string JwtSigningKey = "test-only-signing-key-at-least-32-bytes-long!!";
+
+    /// <summary>
+    /// Whether this host enforces the real plan limits. Off by default — see the note in
+    /// <see cref="ConfigureWebHost"/>.
+    /// </summary>
+    public bool RealEntitlements { get; init; }
 
     private readonly string _databaseName = Guid.NewGuid().ToString("N");
 
@@ -184,6 +192,25 @@ public class ScanApiFactory : WebApplicationFactory<Program>
             // its own container and skips when no corpus is reachable.
             services.RemoveAll<IKnowledgeRetriever>();
             services.AddScoped<IKnowledgeRetriever, SeedKnowledgeRetriever>();
+
+            // Plan limits off unless a test asks for them.
+            //
+            // Entitlements resolve through Tenant.PlanTier, and an absent tenant row reads as the
+            // free tier -- correct in production, where registration always writes one, and wrong
+            // here, where most suites seed a scan job and a project directly and never materialize
+            // the tenant they belong to. Left on, every one of them would be metered at two scans
+            // a day and the third submission in a class would come back 429, which is a fact about
+            // this fixture rather than about the code under test.
+            //
+            // Quota is still tested through the real host: ScanQuotaTests sets RealEntitlements
+            // and seeds a tenant on the tier it wants. That is the honest way round -- the default
+            // keeps metering out of the suites that are about something else, not out of the suite
+            // that is about it.
+            if (!RealEntitlements)
+            {
+                services.RemoveAll<ITenantEntitlements>();
+                services.AddScoped<ITenantEntitlements>(_ => new FakeTenantEntitlements());
+            }
         });
     }
 

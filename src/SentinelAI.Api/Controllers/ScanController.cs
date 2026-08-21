@@ -1,7 +1,9 @@
+using System.Globalization;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SentinelAI.Api.Problems;
+using SentinelAI.Application.Common.Behaviors;
 using SentinelAI.Application.Features.Scan.Commands.Dispatch;
 using SentinelAI.Application.Features.Scan.Commands.Purge;
 using SentinelAI.Application.Features.Scan.Commands.RunAudit;
@@ -41,6 +43,13 @@ public class ScanController(ISender sender) : ControllerBase
         await using var bundleStream = request.Bundle.OpenReadStream();
 
         var response = await sender.Send(new SubmitScanCommand(request.Metadata, bundleStream), ct);
+
+        // The quota behavior answers 429 with the reset in the body, because Response carries no
+        // headers and Application does not get to know about them. Lifting it onto Retry-After
+        // here is what the API design document specifies, and it is the difference between a CI
+        // runner backing off until midnight and one retrying in a tight loop until it gives up.
+        if (response.Data is QuotaExceeded quota)
+            Response.Headers.RetryAfter = quota.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
 
         return StatusCode((int)response.StatusCode, response);
     }

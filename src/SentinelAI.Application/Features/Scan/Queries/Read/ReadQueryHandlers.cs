@@ -149,14 +149,22 @@ public sealed class GetFindingsQueryHandler(IUnitOfWork unitOfWork, ICallerConte
     }
 
     internal static CursorPage<TView> Page<TRow, TView>(
-        List<TRow> rows, int limit, Func<TRow, Guid> idOf, Func<TRow, TView> project)
+        List<TRow> rows, int limit, Func<TRow, Guid> idOf, Func<TRow, TView> project) =>
+        Page(rows, limit, row => Cursor.Encode(idOf(row)), project);
+
+    /// <summary>
+    /// The same paging for a list whose cursor is not a bare id — see
+    /// <see cref="Cursor.Encode(DateTime, Guid)"/> for why a time-ordered list needs one.
+    /// </summary>
+    internal static CursorPage<TView> Page<TRow, TView>(
+        List<TRow> rows, int limit, Func<TRow, string> cursorOf, Func<TRow, TView> project)
     {
         var hasMore = rows.Count > limit;
         var items = hasMore ? rows.Take(limit).ToList() : rows;
 
         return CursorPage<TView>.Of(
             [.. items.Select(project)],
-            hasMore && items.Count > 0 ? Cursor.Encode(idOf(items[^1])) : null,
+            hasMore && items.Count > 0 ? cursorOf(items[^1]) : null,
             limit);
     }
 }

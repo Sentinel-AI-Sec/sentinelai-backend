@@ -180,6 +180,17 @@ public sealed class AccountDeletionTests : IAsyncLifetime
         db.Citations.Add(citation);
         db.Subscriptions.Add(subscription);
 
+        // Today's quota meter. Seeded like everything else here so the reflection sweep over
+        // ITenantOwned has a row of this type to find — the sweep is only as good as this seed,
+        // and a type it never sees seeded is a type it cannot prove is deleted.
+        db.ScanQuotaCounters.Add(new ScanQuotaCounter
+        {
+            Id = Guid.CreateVersion7(),
+            TenantId = tenantId,
+            UtcDay = DateOnly.FromDateTime(DateTime.UtcNow),
+            Count = 1,
+        });
+
         await db.SaveChangesAsync();
         return job.Id;
     }
