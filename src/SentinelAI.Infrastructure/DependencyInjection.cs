@@ -163,6 +163,18 @@ public static class DependencyInjection
         // rebuilding the container.
         services.Configure<ScanWorkerOptions>(configuration.GetSection(ScanWorkerOptions.SectionName));
         services.AddScoped<IScanJobClaim, SqlScanJobClaim>();
+
+        // Starting a scan from the console (SEC-43 counterpart): the API asks the repository's own
+        // CI to run the scan workflow, rather than cloning customer code and running scanners
+        // itself. A typed HttpClient because it is one POST to api.github.com; the token is read
+        // per call from IOptionsMonitor so a rotation needs no restart.
+        services.Configure<GitHubDispatchOptions>(configuration.GetSection(GitHubDispatchOptions.SectionName));
+        services.AddHttpClient<IScanDispatcher, GitHubScanDispatcher>(client =>
+        {
+            // GitHub rejects a request with no User-Agent outright.
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("SentinelAI");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
         services.AddHostedService<ScanPipelineWorker>();
 
         services.AddScoped<IScanJobRepository, ScanJobRepository>();

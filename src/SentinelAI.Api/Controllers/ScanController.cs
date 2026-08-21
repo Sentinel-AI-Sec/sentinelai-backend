@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SentinelAI.Api.Problems;
+using SentinelAI.Application.Features.Scan.Commands.Dispatch;
 using SentinelAI.Application.Features.Scan.Commands.Purge;
 using SentinelAI.Application.Features.Scan.Commands.RunAudit;
 using SentinelAI.Application.Features.Scan.Commands.RunGraph;
@@ -40,6 +41,37 @@ public class ScanController(ISender sender) : ControllerBase
         await using var bundleStream = request.Bundle.OpenReadStream();
 
         var response = await sender.Send(new SubmitScanCommand(request.Metadata, bundleStream), ct);
+
+        return StatusCode((int)response.StatusCode, response);
+    }
+
+    /// <summary>
+    /// Starts a scan of a registered project's branch, without the caller supplying a bundle.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The counterpart to <see cref="Submit"/> for people rather than for CI. <c>POST /v1/scans</c>
+    /// takes a commit sha, a PR ref, a scanner-version map and a <c>.tar.gz</c> of scanner output,
+    /// because the GitHub Action is what fills those in; asking a human for them is asking them to
+    /// be a CI runner. This takes a project and, optionally, a branch.
+    /// </para>
+    /// <para>
+    /// <b>It answers <c>202</c> with no scan job id, and that is not an omission.</b> The scan job
+    /// does not exist yet — CI has been asked to run, and will upload its bundle through
+    /// <see cref="Submit"/> minutes later, exactly as a pull request does. The console finds the
+    /// resulting job by listing the project's scans. An id invented here would be one the screen
+    /// polls forever if CI declines the run.
+    /// </para>
+    /// <para>
+    /// A signed-in user, never the Action's machine token: that token exists to upload a scan CI
+    /// has already run, and letting it ask for another one is a loop with a scan job at every turn.
+    /// </para>
+    /// </remarks>
+    [HttpPost("dispatch")]
+    public async Task<IActionResult> Dispatch(
+        [FromBody] DispatchScanCommand command, CancellationToken ct)
+    {
+        var response = await sender.Send(command, ct);
 
         return StatusCode((int)response.StatusCode, response);
     }
