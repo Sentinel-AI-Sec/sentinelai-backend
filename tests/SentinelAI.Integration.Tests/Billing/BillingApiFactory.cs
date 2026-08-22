@@ -52,6 +52,11 @@ public sealed class BillingApiFactory : ScanApiFactory
             {
                 // Non-empty so BillingSettings.IsConfigured is true. Never used to reach Stripe:
                 // the gateway is replaced below.
+                // Named explicitly. The committed appsettings.json asks for Simulated so a fresh
+                // clone can demo an upgrade with no account; this suite is about the Stripe path,
+                // and holding credentials while asking to simulate is a contradiction the loader
+                // refuses to guess its way through.
+                ["Billing:Provider"] = "Stripe",
                 ["Billing:SecretKey"] = "sk_test_not_a_real_key",
                 ["Billing:WebhookSecret"] = WebhookSecret,
                 ["Billing:FreePlanId"] = "free",

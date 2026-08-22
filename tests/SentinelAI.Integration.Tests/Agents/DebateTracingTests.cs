@@ -215,9 +215,15 @@ public class DebateTracingTests
             audit.Transcript.Select(t => (t.Role, t.Round)).ToList(),
             debated.Select(t => (t.Role, t.Round)).ToList());
 
+        // Line endings normalized on both sides. The scripted turns come from raw string literals
+        // in ScriptedChatClient.cs, so their newlines are whatever that file was checked out with
+        // — LF on a Linux CI runner, CRLF on a Windows working copy, and the repository carries no
+        // .gitattributes to settle it. Comparing raw made this test pass or fail on the developer's
+        // platform rather than on the code. What it is actually asserting is that the replayed
+        // content is the content the debate produced, which is true either way.
         Assert.Equal(
-            audit.Transcript.Select(t => t.Content).ToList(),
-            debated.Select(t => t.Completion ?? string.Empty).ToList());
+            audit.Transcript.Select(t => t.Content.ReplaceLineEndings()).ToList(),
+            debated.Select(t => (t.Completion ?? string.Empty).ReplaceLineEndings()).ToList());
 
         Assert.All(replay.Turns, turn =>
         {

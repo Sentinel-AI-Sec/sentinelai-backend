@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using SentinelAI.Domain.Enums;
 using SubscriptionEntity = SentinelAI.Domain.Models.Subscription;
+using SentinelAI.Application.Abstractions.Billing;
 
 namespace SentinelAI.Application.Features.Billing;
 
@@ -98,8 +99,21 @@ public sealed record SubscriptionView
 
     [JsonPropertyName("trial_end")] public DateTime? TrialEnd { get; init; }
 
-    public static SubscriptionView From(SubscriptionEntity? subscription)
+    /// <summary>
+    /// Which processor is behind this subscription: <c>stripe</c>, <c>simulated</c> or <c>none</c>.
+    /// </summary>
+    /// <remarks>
+    /// On the wire rather than only in a log, because the difference between "this customer paid"
+    /// and "this customer clicked a button on a page that took no card" is the entire meaning of
+    /// the record — and a screen that cannot tell them apart will state the wrong one. The billing
+    /// page shows it; nobody should have to read server logs to find out whether money moved.
+    /// </remarks>
+    [JsonPropertyName("provider")] public required string Provider { get; init; }
+
+    public static SubscriptionView From(SubscriptionEntity? subscription, BillingProvider provider)
     {
+        var providerName = provider.ToString().ToLowerInvariant();
+
         if (subscription is null || subscription.Status == SubscriptionStatus.None)
         {
             return new SubscriptionView
@@ -108,11 +122,14 @@ public sealed record SubscriptionView
                 Status = BillingWire.Of(SubscriptionStatus.None),
                 Quantity = 0,
                 CancelAtPeriodEnd = false,
+                Provider = providerName,
             };
         }
 
         return new SubscriptionView
         {
+            Provider = providerName,
+
             // Empty is not a plan. A row can hold a status without a plan id if a price was
             // retired from configuration while a customer was still subscribed to it, and null
             // renders as the free tier rather than as a plan the UI has no entry for.

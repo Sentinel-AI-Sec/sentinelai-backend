@@ -4,6 +4,7 @@ using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
 using SentinelAI.Domain.Premitives;
 using SubscriptionEntity = SentinelAI.Domain.Models.Subscription;
+using SentinelAI.Application.Abstractions.Billing;
 
 namespace SentinelAI.Application.Features.Billing.Queries.GetSubscription;
 
@@ -24,7 +25,8 @@ namespace SentinelAI.Application.Features.Billing.Queries.GetSubscription;
 /// billing page break when Stripe is having an incident.
 /// </para>
 /// </remarks>
-public sealed class GetSubscriptionQueryHandler(IUnitOfWork unitOfWork, ICallerContext caller)
+public sealed class GetSubscriptionQueryHandler(
+    IUnitOfWork unitOfWork, ICallerContext caller, BillingSettings settings)
     : IRequestHandler<GetSubscriptionQuery, Response>
 {
     public async Task<Response> Handle(GetSubscriptionQuery request, CancellationToken ct)
@@ -38,7 +40,7 @@ public sealed class GetSubscriptionQueryHandler(IUnitOfWork unitOfWork, ICallerC
             .GetWhereAsync(s => s.TenantId == tenantId);
 
         return await Response.SuccessAsync(
-            SubscriptionView.From(subscriptions.FirstOrDefault()),
+            SubscriptionView.From(subscriptions.FirstOrDefault(), settings.Provider),
             "subscription read",
             HttpStatusCode.OK);
     }

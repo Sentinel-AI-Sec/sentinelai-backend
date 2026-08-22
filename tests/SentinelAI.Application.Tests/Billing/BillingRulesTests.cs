@@ -30,7 +30,7 @@ public class BillingRulesTests
         Plans = Catalog(),
         AllowedReturnOrigins = origins,
         FreePlanId = "free",
-        IsConfigured = true,
+        Provider = BillingProvider.Stripe,
     };
 
     // ---- the allowlist -----------------------------------------------------------------
@@ -181,8 +181,8 @@ public class BillingRulesTests
             StripeCustomerId = "cus_abandoned",
         };
 
-        var fromNothing = SubscriptionView.From(null);
-        var fromRow = SubscriptionView.From(abandoned);
+        var fromNothing = SubscriptionView.From(null, BillingProvider.Stripe);
+        var fromRow = SubscriptionView.From(abandoned, BillingProvider.Stripe);
 
         Assert.Equal("none", fromNothing.Status);
         Assert.Equal(fromNothing.Status, fromRow.Status);
@@ -200,12 +200,12 @@ public class BillingRulesTests
         var trialing = SubscriptionView.From(new SubscriptionEntity
         {
             PlanId = "team", Status = SubscriptionStatus.Trialing, TrialEnd = trialEnd,
-        });
+        }, BillingProvider.Stripe);
 
         var converted = SubscriptionView.From(new SubscriptionEntity
         {
             PlanId = "team", Status = SubscriptionStatus.Active, TrialEnd = trialEnd,
-        });
+        }, BillingProvider.Stripe);
 
         Assert.NotNull(trialing.TrialEnd);
         Assert.Null(converted.TrialEnd);
@@ -222,7 +222,7 @@ public class BillingRulesTests
             PlanId = "team",
             Status = SubscriptionStatus.Active,
             CurrentPeriodEnd = new DateTime(2026, 9, 20, 10, 0, 0, DateTimeKind.Unspecified),
-        });
+        }, BillingProvider.Stripe);
 
         Assert.Equal(DateTimeKind.Utc, view.CurrentPeriodEnd!.Value.Kind);
     }

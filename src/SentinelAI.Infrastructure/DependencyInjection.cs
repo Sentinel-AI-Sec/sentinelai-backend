@@ -191,9 +191,35 @@ public static class DependencyInjection
         // it unconditionally matters — a deployment with no Stripe account is a supported state,
         // and the endpoints answer 503 with an honest reason rather than failing to resolve.
         services.Configure<StripeOptions>(configuration.GetSection(StripeOptions.SectionName));
+
         services.AddSingleton(_ => BillingSettingsLoader.Load(configuration));
-        services.AddScoped<IBillingGateway, StripeBillingGateway>();
-        services.AddScoped<IBillingEventReader, StripeEventReader>();
+
+        // Both gateways are registered and the choice is made when one is first resolved, not here.
+        //
+        // Reading the provider at registration time would settle it against whatever configuration
+        // looked like at that moment, which is before any source layered on afterwards has been
+        // merged -- the same trap AddDebateServices documents for the model options, and the reason
+        // ScanApiFactory has to replace built registrations rather than override config for those.
+        // A deployment never notices the difference; a test that configures a provider notices
+        // immediately, because it silently gets the other one.
+        //
+        // Simulated is what the committed appsettings.json asks for, so a fresh clone can demo an
+        // upgrade end to end with no Stripe account. The deployed app overrides it with
+        // Billing__Provider=Stripe, exactly as it already overrides SentinelAI__Models__Provider.
+        services.AddScoped<StripeBillingGateway>();
+        services.AddScoped<SimulatedBillingGateway>();
+        services.AddScoped<StripeEventReader>();
+        services.AddScoped<SimulatedBillingEventReader>();
+
+        services.AddScoped<IBillingGateway>(sp =>
+            sp.GetRequiredService<BillingSettings>().IsSimulated
+                ? sp.GetRequiredService<SimulatedBillingGateway>()
+                : sp.GetRequiredService<StripeBillingGateway>());
+
+        services.AddScoped<IBillingEventReader>(sp =>
+            sp.GetRequiredService<BillingSettings>().IsSimulated
+                ? sp.GetRequiredService<SimulatedBillingEventReader>()
+                : sp.GetRequiredService<StripeEventReader>());
 
         // The one place tenant isolation is stepped around for billing. See the interface for
         // why the webhook cannot run under the query filter and why this is safe.

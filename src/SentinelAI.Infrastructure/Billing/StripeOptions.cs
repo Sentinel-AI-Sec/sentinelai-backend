@@ -27,6 +27,24 @@ public sealed class StripeOptions
 {
     public const string SectionName = "Billing";
 
+    /// <summary>
+    /// Which processor to use: <c>Stripe</c>, <c>Simulated</c>, or <c>None</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Empty means "decide from the credentials": Stripe when both secrets are present, otherwise
+    /// nothing. That default is the safe one — a deployment cannot fall into simulating payments
+    /// by forgetting a setting, it has to ask for it by name.
+    /// </para>
+    /// <para>
+    /// <c>Simulated</c> is what the committed <c>appsettings.json</c> asks for, so a fresh clone
+    /// demos the full upgrade flow with no Stripe account. The deployed app overrides it with
+    /// <c>Billing__Provider=Stripe</c>, exactly as it already overrides
+    /// <c>SentinelAI__Models__Provider</c>.
+    /// </para>
+    /// </remarks>
+    public string Provider { get; set; } = string.Empty;
+
     /// <summary>Stripe secret API key (<c>sk_...</c>). Empty means billing is off.</summary>
     public string SecretKey { get; set; } = string.Empty;
 
@@ -98,19 +116,24 @@ public static class BillingSettingsLoader
         var options = new StripeOptions();
         configuration.GetSection(StripeOptions.SectionName).Bind(options);
 
+        var provider = ResolveProvider(options);
+
         var origins = options.AllowedReturnOrigins.Count > 0
             ? options.AllowedReturnOrigins
             : configuration.GetSection(CorsAllowedOriginsKey).Get<string[]>() ?? [];
 
         return new BillingSettings
         {
-            Plans = new PlanCatalog(ReadPrices(options)),
+            // The simulated processor sells the whole ladder, so the demo can reach every tier.
+            // Its "price ids" are synthetic and never leave this deployment; PlanCatalog only ever
+            // maps them back to a plan, and the simulated reader is the only thing that mints them.
+            Plans = new PlanCatalog(
+                provider is BillingProvider.Simulated ? SimulatedPrices() : ReadPrices(options)),
             AllowedReturnOrigins = [.. NormalizeOrigins(origins)],
             FreePlanId = string.IsNullOrWhiteSpace(options.FreePlanId)
                 ? "free"
                 : options.FreePlanId.Trim(),
-            IsConfigured = !string.IsNullOrWhiteSpace(options.SecretKey)
-                && !string.IsNullOrWhiteSpace(options.WebhookSecret),
+            Provider = provider,
         };
     }
 
@@ -155,4 +178,60 @@ public static class BillingSettingsLoader
                 ? uri.GetLeftPart(UriPartial.Authority)
                 : origin.Trim().TrimEnd('/'))
             .Distinct(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Which processor the configuration asks for, defaulting to whatever the credentials imply.
+    /// </summary>
+    /// <remarks>
+    /// An unrecognised name is <see cref="BillingProvider.None"/> rather than an exception or a
+    /// fallback to Stripe: a typo in this setting must not silently either take the API down at
+    /// boot or start charging cards. None is the state the endpoints already handle honestly.
+    /// </remarks>
+    private static BillingProvider ResolveProvider(StripeOptions options)
+    {
+        var hasStripeKeys = !string.IsNullOrWhiteSpace(options.SecretKey)
+            && !string.IsNullOrWhiteSpace(options.WebhookSecret);
+
+        if (string.IsNullOrWhiteSpace(options.Provider))
+            return hasStripeKeys ? BillingProvider.Stripe : BillingProvider.None;
+
+        if (!Enum.TryParse<BillingProvider>(options.Provider.Trim(), ignoreCase: true, out var named))
+            return BillingProvider.None;
+
+        // Asking to simulate on a deployment that holds real Stripe credentials is a
+        // contradiction, and the only two ways to resolve it silently are both bad: simulate, and
+        // paying customers are handed free upgrades; use Stripe, and a staging environment charges
+        // real cards. Neither is a guess worth making on someone's behalf, so it fails at boot --
+        // the same stance ProviderReadiness takes for the model providers, and for the same reason.
+        if (named is BillingProvider.Simulated && hasStripeKeys)
+        {
+            throw new InvalidOperationException(
+                "Billing:Provider is 'Simulated' but Stripe credentials are configured. Set it to "
+                + "'Stripe' to take payments, or clear Billing:SecretKey and Billing:WebhookSecret "
+                + "to simulate them. Refusing to guess which was meant.");
+        }
+
+        // Naming Stripe without the keys to reach it is a misconfiguration, and answering 503 says
+        // so far more usefully than an exception from the SDK on a customer's first checkout.
+        return named is BillingProvider.Stripe && !hasStripeKeys ? BillingProvider.None : named;
+    }
+
+    /// <summary>
+    /// Synthetic prices for the simulated processor: every sellable plan, at both cadences.
+    /// </summary>
+    /// <remarks>
+    /// The ids are deliberately shaped as <c>sim_price_*</c> rather than <c>price_*</c>. If one
+    /// ever turns up in a log, a support thread or a Stripe dashboard search, it should be
+    /// immediately obvious that it never came from Stripe.
+    /// </remarks>
+    private static IEnumerable<PlanPrice> SimulatedPrices()
+    {
+        string[] sellable = ["pro", "max", "team"];
+
+        foreach (var plan in sellable)
+        {
+            foreach (var period in Enum.GetValues<BillingPeriod>())
+                yield return new PlanPrice(plan, period, $"sim_price_{plan}_{period}".ToLowerInvariant());
+        }
+    }
 }

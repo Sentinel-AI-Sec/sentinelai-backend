@@ -27,17 +27,40 @@ public sealed class BillingSettings
     public required string FreePlanId { get; init; }
 
     /// <summary>
-    /// Whether Stripe credentials are present. False means the endpoints answer
-    /// <c>503 Service Unavailable</c> instead of attempting a call that would fail at the vendor.
+    /// Which processor is wired up. See <see cref="BillingProvider"/>.
+    /// </summary>
+    public required BillingProvider Provider { get; init; }
+
+    /// <summary>
+    /// Whether the simulated processor is in force — no card, no money, real flow.
     /// </summary>
     /// <remarks>
+    /// Surfaced on the subscription response so the billing screen can say so. A deployment that
+    /// simulates payments and looks identical to one that takes them is a deployment where nobody
+    /// can tell whether a customer actually paid.
+    /// </remarks>
+    public bool IsSimulated => Provider is BillingProvider.Simulated;
+
+    /// <summary>
+    /// Whether the endpoints can do anything at all. False means <c>503 Service Unavailable</c>
+    /// instead of attempting a call that would fail at the vendor.
+    /// </summary>
+    /// <remarks>
+    /// <para>
     /// Reported rather than thrown at startup on purpose. Billing is optional — the offline
     /// demo, the integration suite and a fresh clone all run without a Stripe account — and an
     /// API that refuses to boot without one would make every other endpoint hostage to a
     /// commercial integration. The billing screens already render an honest "not configured"
     /// state; this is what tells them so.
+    /// </para>
+    /// <para>
+    /// Derived from <see cref="Provider"/> rather than stored beside it. Two settable fields
+    /// answering one question is two fields that can disagree, and the disagreements that matter
+    /// here are a checkout that 503s on a working account, or one that calls a vendor which is not
+    /// there.
+    /// </para>
     /// </remarks>
-    public required bool IsConfigured { get; init; }
+    public bool IsConfigured => Provider is not BillingProvider.None;
 
     /// <summary>
     /// Whether a URL the browser supplied is one Stripe may be told to return to.
