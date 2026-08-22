@@ -1,5 +1,6 @@
 using SentinelAI.Application.Abstractions;
 using SentinelAI.Domain.Models;
+using SentinelAI.Application.Features.Scan.Retrieval;
 
 namespace SentinelAI.Application.Features.Scan.ThinSlice;
 
@@ -54,4 +55,14 @@ public sealed record ThinSliceResult
     /// one that cannot has to take the deletion on trust.
     /// </remarks>
     public required RetentionOutcome Retention { get; init; }
+
+    /// <summary>
+    /// How much of what was scanned the corpus could actually ground.
+    /// </summary>
+    /// <remarks>
+    /// One property per stage, so a test can tell a retrieval that ran and found nothing from one
+    /// that never ran — the same reason every other property here exists. Nullable because a caller
+    /// constructing a result by hand should not have to invent one.
+    /// </remarks>
+    public RetrievalEvaluation? Evaluation { get; init; }
 }

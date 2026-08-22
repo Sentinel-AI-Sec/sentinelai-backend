@@ -65,6 +65,7 @@ public static class DependencyInjection
         // stage left at Candidate, so GET /v1/scans/{id}/chains reflects what Red and Blue
         // actually concluded rather than showing every chain untouched forever.
         services.AddScoped<Features.Scan.Graph.ChainOutcomeWriter>();
+        services.AddScoped<Features.Scan.Audit.AuditIntegrityWriter>();
 
         // The graph stage as one callable unit — the four seam writers plus SEC-20 over one
         // ingested bundle. POST /v1/scans/{id}/graph is its only caller today; a queue-driven

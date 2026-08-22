@@ -124,8 +124,16 @@ public sealed class ThinSlicePipeline(
         var byRole = new Dictionary<AgentRole, IReadOnlyList<string>>();
         var corpusVersions = new HashSet<string>(StringComparer.Ordinal);
 
+        // The results themselves, not just the chunks taken from them. Grounding coverage is
+        // computed from what each retrieval answered, and this loop was the only place that ever
+        // saw it — RetrievalEvaluation existed as an assertable type with nothing outside the tests
+        // assembling one.
+        var retrieved = new List<RetrievalResult>();
+
         foreach (var role in RetrievingRoles)
-            byRole[role] = await RetrieveAsync(findings, handoff, role, corpusVersions, ct);
+            byRole[role] = await RetrieveAsync(findings, handoff, role, corpusVersions, retrieved, ct);
+
+        var evaluation = RetrievalEvaluation.Of(retrieved);
 
         // The union, for the report's citations: a chunk cited by either agent is knowledge the
         // audit rests on, and the report does not care which of them fetched it.
@@ -184,6 +192,7 @@ public sealed class ThinSlicePipeline(
             Audit = audit,
             Report = report,
             Retention = retentionOutcome,
+            Evaluation = evaluation,
         };
     }
 
@@ -269,7 +278,7 @@ public sealed class ThinSlicePipeline(
 
     private async Task<IReadOnlyList<string>> RetrieveAsync(
         IReadOnlyList<Finding> findings, AttackGraphHandoff handoff, AgentRole role,
-        HashSet<string> corpusVersions, CancellationToken ct)
+        HashSet<string> corpusVersions, List<RetrievalResult> retrieved, CancellationToken ct)
     {
         var chunks = new List<string>();
         var seenQueries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -291,6 +300,7 @@ public sealed class ThinSlicePipeline(
             // not — the seam is the same either way, which is what the walking skeleton
             // established it for.
             var result = await retriever.RetrieveAsync(finding, AgentRetrieval.IntentFor(role)!.Value, ct);
+            retrieved.Add(result);
 
             foreach (var chunk in result.Chunks)
             {

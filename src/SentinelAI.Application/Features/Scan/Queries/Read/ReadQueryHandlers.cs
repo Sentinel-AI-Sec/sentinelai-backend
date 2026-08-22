@@ -322,3 +322,52 @@ public sealed class GetReportQueryHandler(IUnitOfWork unitOfWork, ICallerContext
         return await Response.SuccessAsync(view, "draft audit", HttpStatusCode.OK);
     }
 }
+
+// ---- audit integrity (admin) -----------------------------------------------------------
+
+/// <summary>
+/// Reads one scan's integrity record. Admin only.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The role gate is applied <em>after</em> <see cref="ReadGuard.AuthorizeScanAsync"/>, and the
+/// order is the point: another tenant's scan id is answered 404 by the guard before the role is
+/// ever consulted, so an admin cannot use this to discover which scan ids exist elsewhere. A role
+/// check first would turn the endpoint into an existence oracle for anyone holding the role.
+/// </para>
+/// <para>
+/// A scan with no record yet is a 404 rather than an empty object. The row is written at the end
+/// of the audit stage, so its absence means the scan has not been adjudicated yet — which is a
+/// different answer from "adjudicated, nothing to report", and the two must not render alike.
+/// </para>
+/// </remarks>
+public sealed class GetAuditIntegrityQueryHandler(IUnitOfWork unitOfWork, ICallerContext caller)
+    : IRequestHandler<GetAuditIntegrityQuery, Response>
+{
+    public async Task<Response> Handle(GetAuditIntegrityQuery request, CancellationToken ct)
+    {
+        var (failure, _) = await ReadGuard.AuthorizeScanAsync(unitOfWork, caller, request.ScanJobId, ct);
+        if (failure is not null) return failure;
+
+        if (caller.Role != Roles.Admin)
+        {
+            return await Response.FailureAsync(
+                "reading a scan's integrity record requires the admin role",
+                HttpStatusCode.Forbidden);
+        }
+
+        var row = await unitOfWork.Repository<ScanAuditIntegrity>()
+            .GetTableAsNotTracked()
+            .FirstOrDefaultAsync(a => a.ScanJobId == request.ScanJobId, ct);
+
+        if (row is null)
+        {
+            return await Response.FailureAsync(
+                $"scan '{request.ScanJobId}' has no integrity record; it has not been audited yet",
+                HttpStatusCode.NotFound);
+        }
+
+        return await Response.SuccessAsync(
+            AuditIntegrityView.From(row), "audit integrity", HttpStatusCode.OK);
+    }
+}

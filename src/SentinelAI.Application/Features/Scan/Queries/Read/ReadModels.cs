@@ -430,3 +430,74 @@ public sealed record ReportCostView
         Rated = report.CostRated,
     };
 }
+
+// ---- GET /v1/scans/{id}/audit-integrity (admin) -----------------------------------------
+
+/// <summary>
+/// The machine-checkable facts about one scan's reasoning.
+/// </summary>
+/// <remarks>
+/// Deliberately absent from the UI's <c>wire.ts</c>. This is an operator surface: it answers "did
+/// that run behave", and every field is either self-reported by the pipeline or checked against the
+/// graph the same scan built. None of it is a security judgement, and read as one it would mislead.
+/// </remarks>
+public sealed record AuditIntegrityView
+{
+    [JsonPropertyName("scan_job_id")] public required string ScanJobId { get; init; }
+    [JsonPropertyName("adjudicated")] public required bool Adjudicated { get; init; }
+    [JsonPropertyName("outcome")] public required string Outcome { get; init; }
+    [JsonPropertyName("rounds")] public required int Rounds { get; init; }
+    [JsonPropertyName("verdict_readable")] public required bool VerdictReadable { get; init; }
+    [JsonPropertyName("terminated_by_turn_cap")] public required bool TerminatedByTurnCap { get; init; }
+    [JsonPropertyName("weakest_join")] public required string WeakestJoin { get; init; }
+
+    [JsonPropertyName("edge_integrity_warnings")] public required int EdgeIntegrityWarnings { get; init; }
+    [JsonPropertyName("edge_integrity_detail")] public required IReadOnlyList<string> EdgeIntegrityDetail { get; init; }
+    [JsonPropertyName("abandoned_reasoning_warnings")] public required int AbandonedReasoningWarnings { get; init; }
+    [JsonPropertyName("abandoned_reasoning_detail")] public required IReadOnlyList<string> AbandonedReasoningDetail { get; init; }
+
+    [JsonPropertyName("retrieval_findings")] public required int RetrievalFindings { get; init; }
+    [JsonPropertyName("retrieval_grounded")] public required int RetrievalGrounded { get; init; }
+    [JsonPropertyName("coverage_percent")] public required int CoveragePercent { get; init; }
+    [JsonPropertyName("modes_that_did_not_fire")] public required IReadOnlyList<string> ModesThatDidNotFire { get; init; }
+
+    [JsonPropertyName("candidate_chains")] public required int CandidateChains { get; init; }
+    [JsonPropertyName("chains_adjudicated")] public required int ChainsAdjudicated { get; init; }
+
+    [JsonPropertyName("corpus_version")] public required string CorpusVersion { get; init; }
+    [JsonPropertyName("harness_version")] public required int HarnessVersion { get; init; }
+    [JsonPropertyName("created_at")] public required DateTime CreatedAt { get; init; }
+
+    public static AuditIntegrityView From(ScanAuditIntegrity row) => new()
+    {
+        ScanJobId = row.ScanJobId.ToString(),
+        Adjudicated = row.Adjudicated,
+        Outcome = row.Outcome.ToLowerInvariant(),
+        Rounds = row.Rounds,
+        VerdictReadable = row.VerdictReadable,
+        TerminatedByTurnCap = row.TerminatedByTurnCap,
+        WeakestJoin = row.WeakestJoin.ToLowerInvariant(),
+        EdgeIntegrityWarnings = row.EdgeIntegrityWarnings,
+        EdgeIntegrityDetail = Lines(row.EdgeIntegrityDetail),
+        AbandonedReasoningWarnings = row.AbandonedReasoningWarnings,
+        AbandonedReasoningDetail = Lines(row.AbandonedReasoningDetail),
+        RetrievalFindings = row.RetrievalFindings,
+        RetrievalGrounded = row.RetrievalGrounded,
+        CoveragePercent = row.CoveragePercent,
+        ModesThatDidNotFire = row.ModesThatDidNotFire is { Length: > 0 }
+            ? row.ModesThatDidNotFire.Split(',')
+            : [],
+        CandidateChains = row.CandidateChains,
+        ChainsAdjudicated = row.ChainsAdjudicated,
+        CorpusVersion = row.CorpusVersion,
+        HarnessVersion = row.HarnessVersion,
+        CreatedAt = row.CreatedAt,
+    };
+
+    /// <summary>
+    /// Warnings back out as a list. Stored as one blob, read as items — a reader wants to count
+    /// them and a newline-delimited string makes that the caller's problem.
+    /// </summary>
+    private static IReadOnlyList<string> Lines(string stored) =>
+        string.IsNullOrEmpty(stored) ? [] : stored.Split('\n');
+}

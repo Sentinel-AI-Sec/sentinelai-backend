@@ -84,6 +84,7 @@ public sealed class TenantPurgeService(
             rows[nameof(Finding)] = await DeleteAsync<Finding>(tenantId, ct);
             rows[nameof(GraphNode)] = await DeleteAsync<GraphNode>(tenantId, ct);
             rows[nameof(ScanBundle)] = await DeleteAsync<ScanBundle>(tenantId, ct);
+            rows[nameof(ScanAuditIntegrity)] = await DeleteAsync<ScanAuditIntegrity>(tenantId, ct);
             rows[nameof(ScanJob)] = await DeleteAsync<ScanJob>(tenantId, ct);
             rows[nameof(Project)] = await DeleteAsync<Project>(tenantId, ct);
             rows[nameof(RefreshToken)] = await DeleteAsync<RefreshToken>(tenantId, ct);

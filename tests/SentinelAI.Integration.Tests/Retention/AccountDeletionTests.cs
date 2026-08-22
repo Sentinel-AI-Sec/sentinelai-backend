@@ -180,6 +180,22 @@ public sealed class AccountDeletionTests : IAsyncLifetime
         db.Citations.Add(citation);
         db.Subscriptions.Add(subscription);
 
+        // The audit-integrity row, so the reflection sweep over ITenantOwned has one of this type
+        // to find. Seeded against the job above, which the unique index requires.
+        db.ScanAuditIntegrities.Add(new ScanAuditIntegrity
+        {
+            Id = Guid.CreateVersion7(),
+            TenantId = tenantId,
+            ScanJobId = job.Id,
+            Outcome = "Converged",
+            WeakestJoin = "Inferred",
+            Adjudicated = true,
+            VerdictReadable = true,
+            CoveragePercent = 100,
+            HarnessVersion = 1,
+            CreatedAt = DateTime.UtcNow,
+        });
+
         // Today's quota meter. Seeded like everything else here so the reflection sweep over
         // ITenantOwned has a row of this type to find — the sweep is only as good as this seed,
         // and a type it never sees seeded is a type it cannot prove is deleted.

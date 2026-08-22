@@ -183,6 +183,21 @@ public class ScanController(ISender sender) : ControllerBase
     public async Task<IActionResult> GetSummary(Guid id, CancellationToken ct) =>
         Render(await sender.Send(new GetScanSummaryQuery(id), ct));
 
+    /// <summary>
+    /// What could be checked about this scan's own reasoning. Admin only.
+    /// </summary>
+    /// <remarks>
+    /// <b>An operator surface, not a customer one.</b> It is absent from the UI's wire types and
+    /// gated on the admin role, because every number here is about whether the run behaved rather
+    /// than about whether the findings are real. A customer reading "2 edge integrity warnings" on
+    /// their own audit would reasonably conclude they had been told their infrastructure was safe
+    /// when the product was not sure — when what happened is a check caught a model overstating
+    /// itself and the chain was capped for it.
+    /// </remarks>
+    [HttpGet("{id:guid}/audit-integrity")]
+    public async Task<IActionResult> GetAuditIntegrity(Guid id, CancellationToken ct) =>
+        Render(await sender.Send(new GetAuditIntegrityQuery(id), ct));
+
     /// <summary>Provenance of the bundle the runner uploaded. Survives the bundle's purge.</summary>
     [HttpGet("{id:guid}/bundle")]
     public async Task<IActionResult> GetBundle(Guid id, CancellationToken ct) =>
