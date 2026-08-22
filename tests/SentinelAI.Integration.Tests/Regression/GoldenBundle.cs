@@ -193,16 +193,33 @@ internal static class GoldenBundle
     /// the fixture's own <c>scan_out/</c> is produced by a real scanner run whose line numbers
     /// and rule ids move with the tools' versions.
     /// </remarks>
-    public static IReadOnlyDictionary<string, string> FixtureSources =>
-        new Dictionary<string, string>(StringComparer.Ordinal)
+    /// <remarks>
+    /// <para>
+    /// A copy may name <em>several</em> originals, because the fixture does not organise its files
+    /// the way a bundle needs them. <c>legacy.tf</c> is the clearest case: the one join it exists to
+    /// carry is spread across a variable, a task definition and a role, in three different files
+    /// there. Naming only the first of them — which this map used to do — meant the other two went
+    /// unchecked, and every line drawn from them was reported as drift forever.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyDictionary<string, IReadOnlyList<string>> FixtureSources =>
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
         {
-            // path in this bundle          →  path in sentinelai-fixtures
-            ["graph-inputs/infra/main.tf"] = "infra/main.tf",
-            ["graph-inputs/infra/iam.tf"] = "infra/iam.tf",
-            ["graph-inputs/infra/s3.tf"] = "infra/s3.tf",
-            ["graph-inputs/infra/legacy.tf"] = "infra/main.tf",
-            ["graph-inputs/src/OrderApp/Dockerfile"] = "src/OrderApp/Dockerfile",
-            ["graph-inputs/src/OrderApp/packages.lock.json"] = "src/OrderApp/packages.lock.json",
+            // path in this bundle          →  path(s) in sentinelai-fixtures
+            ["graph-inputs/infra/main.tf"] = ["infra/main.tf"],
+            ["graph-inputs/infra/iam.tf"] = ["infra/iam.tf"],
+            ["graph-inputs/infra/s3.tf"] = ["infra/s3.tf"],
+
+            // Three sources, one join. See the remarks above.
+            ["graph-inputs/infra/legacy.tf"] =
+                ["infra/variables.tf", "infra/main.tf", "infra/iam.tf"],
+
+            // At the repository root, not under src/OrderApp. The build context is the repo, so
+            // that is where `docker build` expects it — this map said otherwise and the file it
+            // named has never existed.
+            ["graph-inputs/src/OrderApp/Dockerfile"] = ["Dockerfile"],
+
+            ["graph-inputs/src/OrderApp/packages.lock.json"] = ["src/OrderApp/packages.lock.json"],
         };
 
     /// <summary>The fixture repository root, or null when it is not checked out beside this one.</summary>

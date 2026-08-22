@@ -51,17 +51,28 @@ public class FixtureParityTests
         var root = FixtureRepo.Require();
         var drifted = new List<string>();
 
-        foreach (var (copyPath, fixturePath) in GoldenBundle.FixtureSources)
+        foreach (var (copyPath, fixturePaths) in GoldenBundle.FixtureSources)
         {
-            var original = Path.Combine(root, fixturePath.Replace('/', Path.DirectorySeparatorChar));
+            var originals = fixturePaths
+                .Select(p => (Relative: p, Full: Path.Combine(root, p.Replace('/', Path.DirectorySeparatorChar))))
+                .ToList();
 
-            if (!File.Exists(original))
+            var absent = originals.Where(o => !File.Exists(o.Full)).Select(o => o.Relative).ToList();
+
+            if (absent.Count > 0)
             {
-                drifted.Add($"{copyPath}: '{fixturePath}' is not in the fixture repository");
+                drifted.Add(
+                    $"{copyPath}: {string.Join(", ", absent.Select(a => $"'{a}'"))} "
+                    + $"{(absent.Count == 1 ? "is" : "are")} not in the fixture repository");
                 continue;
             }
 
-            var fixtureLines = Meaningful(File.ReadAllText(original)).ToHashSet(StringComparer.Ordinal);
+            // The union of every named original. A copy that draws a block from one file and a
+            // block from another is still a faithful copy; what would not be faithful is a line
+            // that appears in none of them.
+            var fixtureLines = originals
+                .SelectMany(o => Meaningful(File.ReadAllText(o.Full)))
+                .ToHashSet(StringComparer.Ordinal);
 
             var missing = Meaningful(GoldenBundle.Read(copyPath))
                 .Where(line => !fixtureLines.Contains(line))
@@ -70,7 +81,8 @@ public class FixtureParityTests
             if (missing.Count > 0)
             {
                 drifted.Add(
-                    $"{copyPath}: {missing.Count} line(s) are not in '{fixturePath}' — first is "
+                    $"{copyPath}: {missing.Count} line(s) are not in "
+                    + $"{string.Join(" / ", fixturePaths.Select(p => $"'{p}'"))} — first is "
                     + $"'{missing[0]}'");
             }
         }
@@ -122,8 +134,27 @@ public class FixtureParityTests
     /// property being checked is a line number rather than a text.
     /// </remarks>
     private static IEnumerable<string> Meaningful(string text) =>
-        text.ReplaceLineEndings("\n")
-            .Split('\n')
-            .Select(line => line.Trim())
+        text.ReplaceLineEndings()
+            .Split(Environment.NewLine)
+            .Select(Normalize)
             .Where(line => line.Length > 0 && !line.StartsWith('#') && !line.StartsWith("//"));
+
+    /// <summary>
+    /// One line, reduced to what it means.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The trailing comma is the reason this exists. <c>packages.lock.json</c> in the bundle is a
+    /// <em>subset</em> of the fixture's, and the last entry of a JSON object cannot keep the comma
+    /// the fixture's copy has after it — the file would not parse, and the scanners have to parse
+    /// it. So <c>"resolved": "12.0.1"</c> here and <c>"resolved": "12.0.1",</c> there are the same
+    /// line, and reporting them as drift is reporting the trim itself.
+    /// </para>
+    /// <para>
+    /// Nothing else is normalized. Internal alignment is left alone deliberately: collapsing it
+    /// would also hide a changed value, and the copies are verbatim extracts, so they have no
+    /// reason to be aligned differently.
+    /// </para>
+    /// </remarks>
+    private static string Normalize(string line) => line.Trim().TrimEnd(',');
 }
