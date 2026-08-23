@@ -1,0 +1,30 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Checkov",
+          "rules": [
+            { "id": "CKV_AWS_290", "properties": { "tags": ["CWE-284"] } },
+            { "id": "CKV_AWS_18", "properties": { "tags": ["CWE-778"] } }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "CKV_AWS_290",
+          "level": "error",
+          "message": { "text": "IAM policy allows write access without constraints." },
+          "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "infra/iam.tf" }, "region": { "startLine": 25 } } }]
+        },
+        {
+          "ruleId": "CKV_AWS_18",
+          "level": "warning",
+          "message": { "text": "S3 bucket access logging is disabled." },
+          "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "infra/s3.tf" }, "region": { "startLine": 1 } } }]
+        }
+      ]
+    }
+  ]
+}

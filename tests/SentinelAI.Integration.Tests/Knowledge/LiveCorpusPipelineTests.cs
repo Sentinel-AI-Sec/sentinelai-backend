@@ -78,6 +78,7 @@ public class LiveCorpusPipelineTests
             new FixedAudit(),
             new ReportBuilder(),
             new FakeScanRetentionPolicy(),
+            new FakeTenantEntitlements(),
             NullLogger<ThinSlicePipeline>.Instance);
     }
 

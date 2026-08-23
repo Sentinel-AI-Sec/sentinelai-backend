@@ -60,6 +60,7 @@ public class WalkingSkeletonTests
             debate ?? new ScriptedDebate(),
             new ReportBuilder(),
             new FakeScanRetentionPolicy(),
+            new FakeTenantEntitlements(),
             NullLogger<ThinSlicePipeline>.Instance);
 
     // ---- Acceptance box 1: one finding travels all five stages -----------------------------
@@ -109,7 +110,7 @@ public class WalkingSkeletonTests
         var spy = new SpyRetriever();
         var pipeline = new ThinSlicePipeline(
             new GraphSeeder(), new RetrievalQueryBuilder(), spy, new ScanBriefRenderer(),
-            new ScriptedDebate(), new ReportBuilder(), new FakeScanRetentionPolicy(), NullLogger<ThinSlicePipeline>.Instance);
+            new ScriptedDebate(), new ReportBuilder(), new FakeScanRetentionPolicy(), new FakeTenantEntitlements(), NullLogger<ThinSlicePipeline>.Instance);
 
         await pipeline.RunAsync([SeededFinding()], Tenant, Job);
 

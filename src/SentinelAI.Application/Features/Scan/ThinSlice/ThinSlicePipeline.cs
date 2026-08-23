@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using SentinelAI.Application.Abstractions;
+using SentinelAI.Application.Abstractions.Billing;
 using SentinelAI.Application.Features.Scan.Graph;
 using SentinelAI.Application.Features.Scan.Reporting;
 using SentinelAI.Application.Features.Scan.Retrieval;
@@ -34,6 +35,7 @@ public sealed class ThinSlicePipeline(
     IDebateEngine debate,
     ReportBuilder reportBuilder,
     IScanRetentionPolicy retention,
+    ITenantEntitlements entitlements,
     ILogger<ThinSlicePipeline> logger)
 {
     /// <summary>The collection the offensive knowledge is retrieved from (SEC-09).</summary>
@@ -71,6 +73,30 @@ public sealed class ThinSlicePipeline(
     /// <paramref name="graph"/>: the seeder produces nodes with no structural relationship
     /// between them, so a fabricated edge would be a fabricated hop (SEC-26).
     /// </param>
+    /// <summary>
+    /// The audit a scan gets when its plan does not include adjudication.
+    /// </summary>
+    /// <remarks>
+    /// The summary is written for the customer reading the report, and it says what did happen as
+    /// well as what did not — a report that only names the missing feature reads like an error.
+    /// It deliberately claims nothing about the chains: they stay <c>candidate</c>, which is the
+    /// true word for a path nobody has argued over.
+    /// </remarks>
+    private static DraftAudit DraftAuditNotAdjudicated(string planId, string corpusVersion) => new()
+    {
+        Summary =
+            $"Adjudication is not included on the {planId} plan, so no Red/Blue debate was run "
+            + "over this scan. The findings and the resource graph below are complete; the "
+            + "candidate chains have not been asserted, confirmed or refuted by anyone, and are "
+            + "listed as candidates for that reason.",
+        Transcript = [],
+        Rounds = 0,
+        TerminatedByTurnCap = false,
+        Converged = false,
+        Adjudicated = false,
+        CorpusVersion = corpusVersion,
+    };
+
     /// <param name="candidates">
     /// The candidate chains SEC-20's traverser found over that graph, when it has run. Null or
     /// empty produces an empty <see cref="AttackGraphHandoff"/> rather than none — the walking
@@ -98,8 +124,16 @@ public sealed class ThinSlicePipeline(
         var byRole = new Dictionary<AgentRole, IReadOnlyList<string>>();
         var corpusVersions = new HashSet<string>(StringComparer.Ordinal);
 
+        // The results themselves, not just the chunks taken from them. Grounding coverage is
+        // computed from what each retrieval answered, and this loop was the only place that ever
+        // saw it — RetrievalEvaluation existed as an assertable type with nothing outside the tests
+        // assembling one.
+        var retrieved = new List<RetrievalResult>();
+
         foreach (var role in RetrievingRoles)
-            byRole[role] = await RetrieveAsync(findings, handoff, role, corpusVersions, ct);
+            byRole[role] = await RetrieveAsync(findings, handoff, role, corpusVersions, retrieved, ct);
+
+        var evaluation = RetrievalEvaluation.Of(retrieved);
 
         // The union, for the report's citations: a chunk cited by either agent is knowledge the
         // audit rests on, and the report does not care which of them fetched it.
@@ -113,7 +147,20 @@ public sealed class ThinSlicePipeline(
         // which is what keeps "no graph stage ran yet" and "the graph stage ran and found no
         // edges" from being confused with each other.
         var brief = briefRenderer.Render(scanJobId, findings, nodes, byRole, graph is { Count: > 0 } ? edges : null);
-        var audit = await debate.RunAsync(brief, ct) with { CorpusVersion = CorpusVersionOf(corpusVersions) };
+
+        // Adjudication is an entitlement. Everything above this line still ran — the findings are
+        // normalized, the graph is built, the corpus was queried — so a tenant without it gets a
+        // real scan, minus the Red/Blue debate over it.
+        //
+        // The distinction matters more than it looks. A skipped debate is NOT a debate that found
+        // nothing: DraftAudit.NotAdjudicated exists so the report says "nobody examined this"
+        // rather than letting Converged == false fall through to ChainBroken and print a
+        // refutation that no agent ever made.
+        var plan = await entitlements.ForTenantAsync(tenantId, ct);
+
+        var audit = plan.DebateEnabled
+            ? await debate.RunAsync(brief, ct) with { CorpusVersion = CorpusVersionOf(corpusVersions) }
+            : DraftAuditNotAdjudicated(plan.PlanId, CorpusVersionOf(corpusVersions));
 
         // ---- Stage 5: report --------------------------------------------------------------
         var report = reportBuilder.Build(
@@ -145,6 +192,7 @@ public sealed class ThinSlicePipeline(
             Audit = audit,
             Report = report,
             Retention = retentionOutcome,
+            Evaluation = evaluation,
         };
     }
 
@@ -230,7 +278,7 @@ public sealed class ThinSlicePipeline(
 
     private async Task<IReadOnlyList<string>> RetrieveAsync(
         IReadOnlyList<Finding> findings, AttackGraphHandoff handoff, AgentRole role,
-        HashSet<string> corpusVersions, CancellationToken ct)
+        HashSet<string> corpusVersions, List<RetrievalResult> retrieved, CancellationToken ct)
     {
         var chunks = new List<string>();
         var seenQueries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -252,6 +300,7 @@ public sealed class ThinSlicePipeline(
             // not — the seam is the same either way, which is what the walking skeleton
             // established it for.
             var result = await retriever.RetrieveAsync(finding, AgentRetrieval.IntentFor(role)!.Value, ct);
+            retrieved.Add(result);
 
             foreach (var chunk in result.Chunks)
             {

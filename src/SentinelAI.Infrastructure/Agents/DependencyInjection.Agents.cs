@@ -2,12 +2,14 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using SentinelAI.Application.Abstractions;
 using SentinelAI.Application.Debate;
 using SentinelAI.Application.Features.Scan.Security;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Infrastructure.Agents.Orchestration;
 using SentinelAI.Infrastructure.Agents.Providers;
+using SentinelAI.Infrastructure.Observability;
 using SentinelAI.Infrastructure.Security;
 
 namespace SentinelAI.Infrastructure.Agents;
@@ -63,7 +65,23 @@ public static class AgentsDependencyInjection
         // IDebateEngine resolve. TryAdd so a host that has already chosen a scanner keeps it.
         services.TryAddSingleton<ISecretScanner, RegexSecretScanner>();
 
-        services.AddSingleton<DebateEngine>();
+        // SEC-36: the OTLP exporter, when one is configured. Registered from here rather than
+        // from the root module because this is the module that produces the spans — a container
+        // built from AddDebateServices alone should trace, for the same reason it should have a
+        // secret scanner.
+        services.AddSentinelTelemetry(configuration);
+
+        // SEC-36: whether a turn's span may carry its prompt and answer. Resolved through DI
+        // rather than read here so there is one loader and one answer — ConfiguredOutboundEndpoints
+        // reads the same setting to decide whether the collector is job-content egress, and the
+        // two disagreeing would mean prompts exported past a check that never looked at them.
+        services.AddSingleton<DebateEngine>(sp => new DebateEngine(
+            sp.GetRequiredService<IChatClientFactory>(),
+            sp.GetRequiredService<IOptions<DebateOptions>>(),
+            sp.GetRequiredService<ModelPricing>(),
+            sp.GetRequiredService<TracingOptions>().CaptureContent
+                ? TurnTracing.WithContent
+                : TurnTracing.MetadataOnly));
         // SEC-50: the mechanical edge check wraps the redacting engine, not the other way
         // around — it inspects what came back from a debate that already ran, so its position
         // relative to the outbound-redaction concern doesn't matter, but IDebateEngine should

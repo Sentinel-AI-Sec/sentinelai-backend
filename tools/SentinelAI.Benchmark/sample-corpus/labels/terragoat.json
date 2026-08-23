@@ -1,0 +1,56 @@
+[
+  {
+    "id": "terragoat-iam-01",
+    "project": "terragoat",
+    "file": "infra/iam.tf",
+    "line": 25,
+    "category": "CWE-284",
+    "is_vulnerable": true,
+    "note": "Inline policy grants s3:* on Resource '*' to the order task role."
+  },
+  {
+    "id": "terragoat-iam-02",
+    "project": "terragoat",
+    "file": "infra/iam.tf",
+    "line": 60,
+    "category": "CWE-284",
+    "is_vulnerable": true,
+    "note": "Assume-role policy trusts the whole account rather than the ECS service principal."
+  },
+  {
+    "id": "terragoat-log-01",
+    "project": "terragoat",
+    "file": "infra/s3.tf",
+    "line": 3,
+    "category": "CWE-778",
+    "is_vulnerable": true,
+    "note": "No server access logging on the bucket holding customer data."
+  },
+  {
+    "id": "terragoat-iam-clean-01",
+    "project": "terragoat",
+    "file": "infra/iam.tf",
+    "line": 120,
+    "category": "CWE-284",
+    "is_vulnerable": false,
+    "note": "Read-only policy scoped to one bucket ARN. Deliberately correct: a tool reporting here is wrong, and this label is what makes that measurable."
+  },
+  {
+    "id": "terragoat-deser-01",
+    "project": "terragoat",
+    "file": "src/App/OrdersController.cs",
+    "line": 41,
+    "category": "CWE-502",
+    "is_vulnerable": true,
+    "note": "TypeNameHandling.All on a request body. Hand-labelled: no C# OWASP Benchmark exists."
+  },
+  {
+    "id": "terragoat-deser-clean-01",
+    "project": "terragoat",
+    "file": "src/App/OrdersController.cs",
+    "line": 88,
+    "category": "CWE-502",
+    "is_vulnerable": false,
+    "note": "Deserializes into a fixed type with no type resolver. Hand-labelled clean."
+  }
+]

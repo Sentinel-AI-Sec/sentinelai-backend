@@ -6,6 +6,7 @@ using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
 using SentinelAI.Domain.ValueObjects;
 using SentinelAI.Infrastructure.Graph;
+using SentinelAI.Integration.Tests.Regression;
 
 namespace SentinelAI.Integration.Tests.Scan.Graph;
 
@@ -369,24 +370,15 @@ public class FlagshipChainTests
     {
         var unitOfWork = new FakeUnitOfWork(new FakeScanJobRepository());
         var hcl = HclFiles();
-        hcl["graph-inputs/infra/legacy.tf"] = """
-            variable "legacy_worker_image" {
-              default = "registry.internal.example.com/tinyapp-worker:latest"
-            }
-
-            resource "aws_ecs_task_definition" "legacy_worker_task" {
-              family        = "legacy-worker-task"
-              task_role_arn = aws_iam_role.legacy_worker_role.arn
-
-              container_definitions = jsonencode([
-                { name = "legacy-worker", image = var.legacy_worker_image }
-              ])
-            }
-
-            resource "aws_iam_role" "legacy_worker_role" {
-              name = "legacy-worker-role"
-            }
-            """;
+        // Read from the golden bundle rather than embedded here.
+        //
+        // This block used to be a fourth hand-written copy of the same HCL, and the remarks above
+        // are about what a stale copy already cost once: the quoted-value form matched this test
+        // while the real fixture went unparsed for a sprint. Keeping a private copy to prove a
+        // point about private copies was the one arrangement guaranteed to reproduce it —
+        // FixtureParityTests checks the bundle against the fixture, and reading the bundle is
+        // what puts this test behind that check too.
+        hcl["graph-inputs/infra/legacy.tf"] = GoldenBundle.Read("graph-inputs/infra/legacy.tf");
 
         await new CodeInfraSeamWriter(new CodeInfraSeamReader(), unitOfWork, NullLogger<CodeInfraSeamWriter>.Instance)
             .WriteAsync(ProjectDockerfilePath, Dockerfile, hcl, Tenant, Job, CancellationToken.None);

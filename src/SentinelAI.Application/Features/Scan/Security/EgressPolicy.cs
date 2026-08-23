@@ -8,6 +8,25 @@ public enum EgressPurpose
 
     /// <summary>Retrieval — the knowledge corpus / vector store.</summary>
     Rag,
+
+    /// <summary>
+    /// Observability — an OTLP collector receiving debate traces (SEC-36).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Only counts as egress when the traces carry content.</b> A metadata-only trace holds
+    /// token counts, a tier, a latency and a role: nothing of the customer's. Traces carrying
+    /// prompts and completions are a second destination for job content alongside the model
+    /// provider, and that is what this purpose exists to make an operator declare.
+    /// </para>
+    /// <para>
+    /// There is no compiled-in default host, deliberately — the same as <see cref="Rag"/>, and
+    /// for the same reason: there is no vendor. A collector is wherever the deployment put it,
+    /// so exporting prompts means naming the host in <c>Security:Egress:TelemetryHosts</c>,
+    /// where an auditor can read it.
+    /// </para>
+    /// </remarks>
+    Telemetry,
 }
 
 /// <summary>

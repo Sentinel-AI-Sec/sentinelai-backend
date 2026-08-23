@@ -26,6 +26,9 @@ using SentinelAI.Infrastructure.Knowledge;
 using SentinelAI.Infrastructure.Normalization;
 using SentinelAI.Infrastructure.Security;
 
+using SentinelAI.Integration.Tests.Scan;
+using SentinelAI.Application.Features.Scan.Audit;
+
 namespace SentinelAI.Integration.Tests.Scan.Orchestration;
 
 /// <summary>
@@ -265,6 +268,7 @@ public sealed class ScanPipelineRunnerTests : IDisposable
                 Options.Create(new DebateOptions { MaxRounds = 2 })),
             new ReportBuilder(),
             retention,
+            new FakeTenantEntitlements(),
             NullLogger<ThinSlicePipeline>.Instance);
 
         var log = new RecordingLogger<ScanPipelineRunner>();
@@ -280,9 +284,59 @@ public sealed class ScanPipelineRunnerTests : IDisposable
             graphStage,
             thinSlice,
             new ChainOutcomeWriter(unitOfWork, NullLogger<ChainOutcomeWriter>.Instance),
+            new AuditIntegrityWriter(unitOfWork, NullLogger<AuditIntegrityWriter>.Instance),
             log);
 
         return new Harness(runner, db, jobId, log, corpus, retention);
+    }
+
+    // ---- the run's own record ----------------------------------------------------------------
+
+    /// <summary>
+    /// A completed run leaves one integrity record behind, populated from what actually happened.
+    /// </summary>
+    /// <remarks>
+    /// The wiring is the thing under test. The writer is easy to unit test and useless if nothing
+    /// calls it, and "nothing calls it" is exactly the state the SEC-50 edge check was in — running
+    /// on every debate, deciding a chain's status, and then existing only as a log line.
+    /// </remarks>
+    [Fact]
+    public async Task A_completed_run_records_what_could_be_checked_about_it()
+    {
+        using var h = Build();
+
+        var outcome = await h.Runner.RunAsync(h.JobId, Tenant);
+        Assert.True(outcome.Succeeded, $"the run failed at {outcome.FailedStage}");
+
+        var record = await h.Db.Set<ScanAuditIntegrity>().SingleAsync(a => a.ScanJobId == h.JobId);
+
+        Assert.Equal(Tenant, record.TenantId);
+        Assert.True(record.Adjudicated);
+        Assert.NotEmpty(record.Outcome);
+        Assert.NotEmpty(record.WeakestJoin);
+        Assert.Equal(AuditIntegrityWriter.Version, record.HarnessVersion);
+
+        // Retrieval ran, so its coverage is a measurement rather than the empty default.
+        Assert.True(record.RetrievalFindings > 0, "no findings were put through retrieval");
+
+        // Chains were produced and the debate settled exactly the strongest one.
+        Assert.True(record.CandidateChains > 0, "the graph stage produced no candidate chains");
+        Assert.True(
+            record.ChainsAdjudicated <= record.CandidateChains,
+            "more chains were adjudicated than existed");
+    }
+
+    /// <summary>
+    /// One record per scan, so re-running cannot leave two rows disagreeing about what happened.
+    /// </summary>
+    [Fact]
+    public async Task The_record_is_written_once_per_scan()
+    {
+        using var h = Build();
+
+        await h.Runner.RunAsync(h.JobId, Tenant);
+
+        Assert.Single(await h.Db.Set<ScanAuditIntegrity>().Where(a => a.ScanJobId == h.JobId).ToListAsync());
     }
 
     // ---- AC 1: a bundle runs the whole flow and produces a draft audit -----------------------

@@ -1,0 +1,30 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "SecurityCodeScan",
+          "rules": [
+            { "id": "SCS0028", "properties": { "tags": ["security", "CWE-502"] } }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "SCS0028",
+          "level": "error",
+          "message": { "text": "Unsafe deserialization of untrusted data in OrdersController." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "file:///home/runner/work/repo/repo/src/OrderApp/Controllers/OrdersController.cs" },
+                "region": { "startLine": 41, "startColumn": 28 }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

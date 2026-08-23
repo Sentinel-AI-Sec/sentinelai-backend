@@ -68,6 +68,48 @@ jobs:
           path: TestResults/*.trx
           if-no-files-found: ignore
 
+      - name: Full-flow regression harness (SEC-49)
+        # Re-runs the harness on its own, after the suite, and always — even when the suite
+        # above went red.
+        #
+        # It is not a second copy of the test: `dotnet test` has already executed these, and
+        # running them again costs five seconds. What the separate step buys is the thing SEC-49
+        # is actually for. A regression in a seam surfaces here as one named step failing with a
+        # stage table in the log ("BROKEN AT: Graph — 8 node(s) and no edges"), instead of as
+        # six assertions buried in a .trx among nine hundred others. `if: always()` matters for
+        # the same reason: when a unit test elsewhere fails, the most useful next question is
+        # whether the pipeline still runs end to end, and a skipped step cannot answer it.
+        if: always()
+        run: >
+          dotnet test SentinelAI.slnx
+          --no-build
+          --configuration Release
+          --filter "FullyQualifiedName~Regression"
+          --logger "console;verbosity=detailed"
+
+      - name: Pack the demo bundle (SEC-44)
+        # The demo driver's packing half, which is where the bundle contract lives and the only
+        # half that can be wrong without a server. It asserts the three entries whose absence or
+        # misnaming ingest refuses with a 422 — the failure that otherwise surfaces five minutes
+        # before a presentation. That the resulting archive *shape* is accepted is covered by
+        # DemoBundleTests; this covers the script that produces it.
+        #
+        # Invoked as `bash ./scripts/…` rather than `./scripts/…`: the repository's shell scripts
+        # are tracked mode 100644 (corpus.sh is too), and Windows checkouts do not record an
+        # executable bit, so relying on one would work here and fail for whoever committed next
+        # from a laptop.
+        run: bash ./scripts/demo.sh --pack-only --out "$RUNNER_TEMP/demo-pack"
+
+      - name: Smoke-run the benchmark runner (SEC-39)
+        # The scorer is unit-tested; the runner is not reachable from a unit test, because its
+        # whole job is reading a directory. This runs it over the committed sample corpus so the
+        # reader, the SARIF parser and the renderer are exercised by CI rather than only by
+        # whoever last ran it by hand. Deterministic and offline — no corpus, no licences.
+        run: >
+          dotnet run --project tools/SentinelAI.Benchmark
+          --configuration Release --no-build
+          -- --corpus tools/SentinelAI.Benchmark/sample-corpus
+
       - name: Smoke-run the offline demo
         # Proves the sample still runs end to end. Scripted provider, so it is deterministic
         # and free — a broken demo should fail CI, not the sprint review.
@@ -142,9 +184,16 @@ jobs:
           echo "No secrets files tracked."
 
       - name: Fail if an API key literal was committed
-        # Provider key prefixes: nvapi- (NVIDIA NIM), sk-ant- (Anthropic), sk- (OpenAI).
+        # Provider key prefixes: nvapi- (NVIDIA NIM), sk-ant- (Anthropic), sk- (OpenAI), and the
+        # Stripe family.
+        #
+        # Stripe's separator is an UNDERSCORE (sk_test_..., whsec_...), so the sk-[A-Za-z0-9]{32,}
+        # pattern above does not match a single one of them — a leaked Stripe key would have
+        # shipped through this gate green. sk/rk are API keys, whsec is a webhook signing secret,
+        # and the signing secret is the more dangerous of the two here: it is what proves a
+        # webhook came from Stripe, so anyone holding it can forge any plan change in the product.
         run: |
-          hits=$(git grep -nIE '(nvapi-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,})' \
+          hits=$(git grep -nIE '(nvapi-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,}|(sk|rk)_(test|live)_[A-Za-z0-9]{16,}|whsec_[A-Za-z0-9]{16,})' \
                  -- . ':(exclude).github/workflows/*' || true)
           if [ -n "$hits" ]; then
             echo "::error::Possible API key committed:"
@@ -289,18 +338,57 @@ jobs:
       # app came up: every boot failure this deployment has had - a missing model key, an
       # unwritable bundle path - produced exactly that, a green deploy and a dead app.
       #
-      # 405 is the pass. /v1/scans is POST-only, so Method Not Allowed proves the route is
-      # mapped and the app is serving. 404 would mean it started but mapped nothing; 503 or
-      # a connection failure means no healthy replica.
+      # The probe is GET /v1/health: anonymous, shallow, and 200 while the process is serving.
+      #
+      # It used to be GET /v1/scans expecting 405, reasoning that the route was POST-only so
+      # Method Not Allowed proved it was mapped. That reasoning expired when the read API gave
+      # /v1/scans a list endpoint - GET, on an [Authorize]'d controller - so the deployed app
+      # answers 401 there, the probe never sees a 405, and a roll-out that worked fails after
+      # the image is already live. Inferring liveness from a verb a route happens not to
+      # implement is exactly what HealthController was added to stop doing.
+      #
+      # 200 alone is still not proof. Container Apps keeps the previous revision serving until
+      # the new one is ready, so an early 200 is usually the OLD image answering - which is how
+      # a container that crashes on boot passes its own smoke test. The health response carries
+      # the build's informational version ("1.0.0+<sha>", the sha coming from SourceLink at
+      # publish time), so this waits for THIS commit to be the one answering.
       - name: Smoke-test the deployed app
         run: |
           fqdn='${{ vars.AZURE_APP_FQDN }}'
-          for attempt in 1 2 3 4 5 6; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "https://$fqdn/v1/scans" || echo 000)
-            echo "attempt $attempt: HTTP $code"
-            [ "$code" = "405" ] && echo "::notice::Deployed and serving at https://$fqdn" && exit 0
+          sha='${{ github.sha }}'
+          out="$RUNNER_TEMP/health.json"
+
+          for attempt in 1 2 3 4 5 6 7 8; do
+            # `|| true` rather than `|| echo 000`: curl's -w writes 000 itself when the request
+            # never completed, and appending a second one prints "000000" in the log.
+            code=$(curl -s -o "$out" -w '%{http_code}' --max-time 30 "https://$fqdn/v1/health" || true)
+            version=''
+            if [ "$code" = "200" ]; then
+              version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$out")
+            fi
+            echo "attempt $attempt: HTTP $code version=${version:-<none>}"
+
+            case "$code:$version" in
+              "200:"*"+$sha")
+                echo "::notice::Deployed and serving $sha at https://$fqdn"
+                exit 0
+                ;;
+              "200:"*+*)
+                # Serving, but not this build: the previous revision still has the traffic.
+                # Keep waiting rather than passing the deploy on someone else's image.
+                echo "  (previous revision still answering - waiting for $sha)"
+                ;;
+              "200:"?*)
+                # A version with no +sha in it - nothing to compare against, so "it is serving"
+                # is all this can honestly assert. Say so instead of failing on it.
+                echo "::warning::Healthy at https://$fqdn, but its version carries no commit sha, so the live build could not be confirmed"
+                exit 0
+                ;;
+            esac
+
             sleep 20
           done
-          echo "::error::App did not answer 405 on /v1/scans after the roll-out. Check the container logs:"
+
+          echo "::error::App did not report healthy on $sha at /v1/health after the roll-out. Check the container logs:"
           echo "  az containerapp logs show -n ${{ vars.AZURE_APP_NAME }} -g ${{ vars.AZURE_RESOURCE_GROUP }} --type console --tail 60"
           exit 1

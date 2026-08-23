@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using SentinelAI.Application.Abstractions.Billing;
 using SentinelAI.Domain.Abstractions.Repositories;
 using SentinelAI.Domain.Models;
 using SentinelAI.Infrastructure.Data;
@@ -39,12 +40,19 @@ namespace SentinelAI.Infrastructure.Implementation.Repositories;
 public sealed class TenantPurgeService(
     SentinelDbContext db,
     IBundleStore bundleStore,
+    IBillingGateway billing,
     ILogger<TenantPurgeService> logger) : ITenantPurge
 {
     public async Task<TenantPurgeReport> PurgeAsync(Guid tenantId, CancellationToken ct = default)
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException("A tenant id is required.", nameof(tenantId));
+
+        // Stripe first, for the same reason storage goes before the rows: once this returns there
+        // is no subscription row left to say a subscription existed, and nothing in this product
+        // would ever look at it again. See CancelBillingAsync for why a failure here does not
+        // abort the deletion.
+        await CancelBillingAsync(tenantId, ct);
 
         // Storage first, while the job rows still say which bundles exist.
         var jobIds = await db.ScanJobs
@@ -76,9 +84,12 @@ public sealed class TenantPurgeService(
             rows[nameof(Finding)] = await DeleteAsync<Finding>(tenantId, ct);
             rows[nameof(GraphNode)] = await DeleteAsync<GraphNode>(tenantId, ct);
             rows[nameof(ScanBundle)] = await DeleteAsync<ScanBundle>(tenantId, ct);
+            rows[nameof(ScanAuditIntegrity)] = await DeleteAsync<ScanAuditIntegrity>(tenantId, ct);
             rows[nameof(ScanJob)] = await DeleteAsync<ScanJob>(tenantId, ct);
             rows[nameof(Project)] = await DeleteAsync<Project>(tenantId, ct);
             rows[nameof(RefreshToken)] = await DeleteAsync<RefreshToken>(tenantId, ct);
+            rows[nameof(Subscription)] = await DeleteAsync<Subscription>(tenantId, ct);
+            rows[nameof(ScanQuotaCounter)] = await DeleteAsync<ScanQuotaCounter>(tenantId, ct);
             rows[nameof(User)] = await DeleteAsync<User>(tenantId, ct);
 
             // The tenant itself last: it is what everything above hung from.
@@ -132,5 +143,55 @@ public sealed class TenantPurgeService(
 
         if (rows.Count > 0) db.Set<TEntity>().RemoveRange(rows);
         return rows.Count;
+    }
+
+    /// <summary>
+    /// Ends this tenant's Stripe subscription, if it has one, before its rows are destroyed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A failure here does not stop the deletion, and that is a deliberate ranking of two bad
+    /// outcomes.</b> SEC-35's promise is that an account can be deleted; making that promise
+    /// conditional on a third party being reachable would mean a Stripe outage — or a revoked API
+    /// key on a deployment that has since stopped selling — leaves a customer unable to delete
+    /// their own data. The other outcome is a card that keeps being charged for an account that
+    /// no longer exists, which is why this is logged at error level with the subscription id: it
+    /// is fixable by a human in the Stripe dashboard in under a minute, and that log line is the
+    /// only trace of it that survives the purge.
+    /// </para>
+    /// <para>
+    /// Read with the query filter ignored and the tenant matched explicitly, like everything else
+    /// in this class. The ambient filter would usually agree, but the blast radius of a delete
+    /// should not depend on who happens to hold the request context.
+    /// </para>
+    /// </remarks>
+    private async Task CancelBillingAsync(Guid tenantId, CancellationToken ct)
+    {
+        var subscriptionId = await db.Subscriptions
+            .IgnoreQueryFilters()
+            .Where(s => s.TenantId == tenantId)
+            .Select(s => s.StripeSubscriptionId)
+            .FirstOrDefaultAsync(ct);
+
+        if (string.IsNullOrWhiteSpace(subscriptionId)) return;
+
+        try
+        {
+            await billing.CancelSubscriptionAsync(subscriptionId, ct);
+
+            logger.LogWarning(
+                "Cancelled Stripe subscription {SubscriptionId} for tenant {TenantId} ahead of "
+                + "account deletion", subscriptionId, tenantId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "Could not cancel Stripe subscription {SubscriptionId} for tenant {TenantId}. The "
+                + "account is being deleted anyway — cancel this subscription by hand in the "
+                + "Stripe dashboard, or the customer keeps being charged for an account that no "
+                + "longer exists. This log line is the only record that survives the purge",
+                subscriptionId, tenantId);
+        }
     }
 }

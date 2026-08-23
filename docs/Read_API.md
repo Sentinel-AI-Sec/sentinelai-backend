@@ -13,14 +13,20 @@ match `SentinelAI_API_Design_V2.1.md` §5.3–5.5 and are pinned by
 
 | Method | Route | Scope | Paged |
 |---|---|---|---|
+| GET | `/v1/scans` | `scan:read` | ✅ |
+| GET | `/v1/scans/{id}/summary` | `scan:read` | — |
 | GET | `/v1/scans/{id}/bundle` | `scan:read` | — |
 | GET | `/v1/scans/{id}/findings` | `scan:read` | ✅ |
 | GET | `/v1/scans/{id}/graph` | `scan:read` | — (capped) |
 | GET | `/v1/scans/{id}/chains` | `scan:read` | ✅ |
+| GET | `/v1/reports` | `report:read` | ✅ |
 | GET | `/v1/reports/{id}` | `report:read` | — |
 | POST | `/v1/scans/{id}/audit` | `scan:write` | — |
 
 The last one is not a read endpoint. See §6.
+
+`GET /v1/scans`, `GET /v1/reports` and `GET /v1/scans/{id}/summary` were added after the original
+SEC-40 set and answer in exactly the same format — see §3.1 and §3.2 for why they exist.
 
 ---
 
@@ -47,6 +53,95 @@ depends on mid-sprint.
 ---
 
 ## 3. Shapes
+
+### 3.1 `GET /v1/scans` and `GET /v1/reports` — the lists
+
+SEC-40 shipped reads addressed by id and nothing that enumerates them. The console's
+`core/history/recents.ts` recorded the consequence in its own header: with no way to list, the
+dashboard substituted *a browser-local index of the ids this browser happened to open* — not the
+tenant's history, but one machine's memory of it, lost on a cache clear and invisible to a
+colleague. These two close that.
+
+```json
+{
+  "items": [
+    { "scan_job_id": "7d4e…", "project_id": "b21f…",
+      "repo_url": "https://github.com/org/repo", "pr_ref": "pr/42", "commit_sha": "abc123",
+      "status": "completed", "stage": "report", "report_id": "a91c…",
+      "bundle_purged": true, "corpus_version": "2026-07-15", "failure_reason": null,
+      "started_at": "2026-08-19T10:03:11Z", "completed_at": "2026-08-19T10:05:40Z" }
+  ],
+  "next_cursor": "AQIDBA…", "limit": 50
+}
+```
+
+**Newest first** — the opposite of `/findings` and `/chains`, which page through the contents of
+one scan in the order the rows were written. These page through history, and the first page a
+person wants is the most recent one.
+
+- `GET /v1/scans` filters with `?project_id=`, `?status=` (`queued|running|completed|failed`) and
+  `?stage=` (`received|normalize|graph|retrieve|debate|report`). Filter values are
+  case-insensitive; an unknown one is a `400`, not an empty page, for the same reason an unknown
+  layer is.
+- `GET /v1/reports` filters with `?project_id=`. Its rows carry `report_id`, `scan_job_id`,
+  `project_id`, `repo_url`, `pr_ref`, `commit_sha`, `framing`, `summary`, `corpus_version`,
+  `retained`, `created_at` and `cost` — **not** the chains, which are the bulk of an audit and the
+  reason `GET /v1/reports/{id}` exists.
+- `framing` is on every report row. A list is exactly where the draft framing would otherwise get
+  dropped, and a screen showing twenty audits with no framing on any of them is where "candidate
+  chains a debate argued over" quietly becomes "twenty findings".
+- Every row carries `repo_url` and `pr_ref` because **a list of bare GUIDs is not a history.**
+  Nobody recognises their own scan by its id.
+- `GET /v1/reports` lists audits that were **kept**. A scan whose submitter declined retention
+  (SEC-35) ran, was reported on, and is correctly absent — which is why the scan list carries
+  `report_id` rather than this being derivable from it.
+
+There is no tenant parameter on either. Every filter narrows; none widens. A `project_id`
+belonging to another tenant matches nothing rather than erroring — indistinguishable from a
+project that does not exist, the same rule as §7.
+
+### 3.2 `GET /v1/scans/{id}/summary` — the totals paging cannot give
+
+A cursor-paged response knows only what it returned. The console's findings screen therefore
+"counts the rows it has loaded, not the scan, because under a cursor it cannot honestly claim the
+latter" — and a page count next to a filter answers "how many have I fetched" while every reader
+parses it as "how many are there". This endpoint is where the real number comes from.
+
+```json
+{
+  "scan_job_id": "7d4e…", "status": "completed", "stage": "report", "report_id": "a91c…",
+  "findings": {
+    "total": 128, "max_severity": 4, "redacted": 3,
+    "by_layer": { "code": 61, "dep": 42, "infra": 25 },
+    "by_severity": { "0": 4, "1": 19, "2": 55, "3": 38, "4": 12 }
+  },
+  "graph": {
+    "nodes": 214, "edges": 331, "hot_nodes": 12,
+    "edges_by_confidence": { "certain": 180, "inferred": 121, "unresolved": 30 }
+  },
+  "chains": {
+    "total": 7, "weakest_join": "unresolved",
+    "by_status": { "candidate": 5, "asserted": 1, "validated": 1, "rejected": 0 }
+  }
+}
+```
+
+- **Every bucket is always present, including at zero.** A missing key and a zero are
+  indistinguishable to a client, and a filter chip cannot be rendered as "empty" if the API never
+  mentions it.
+- **Severity is reported as buckets, never as a mean.** Severities are ordinal; the average of a
+  4 and two 0s describes nothing.
+- **Confidence is three counts, not one score.** `unresolved` is a different statement from
+  `inferred`, not a worse one, and any single number mixing them asserts an ordering the rest of
+  this product spends its whole UI refusing to assert.
+- `max_severity` is `null` — not `0` — when the scan has no findings, because `0` is a real
+  severity a finding can carry.
+- `chains.weakest_join` is the lowest `min_confidence` across every chain: a ceiling on what the
+  scan as a whole can claim.
+
+Every number is a `COUNT` over the same tenant-scoped predicate the corresponding paged endpoint
+filters on, so this and a full walk of that endpoint's pages agree by construction —
+`The_summary_total_matches_a_full_walk_of_the_paged_findings` pins exactly that.
 
 ### `GET /v1/scans/{id}/graph`
 
@@ -142,6 +237,12 @@ It works because every id is `Guid.CreateVersion7()` — UUIDv7 is time-ordered,
 id is stable and chronological. With random UUIDv4 keys this technique would produce an
 arbitrary order and "the next page" would mean nothing.
 
+One nuance worth knowing: UUIDv7 embeds a **millisecond** timestamp, so ids minted inside the same
+millisecond are ordered randomly among themselves. Paging is unaffected — keyset paging needs a
+total order that is *stable*, and an id is stable whatever it sorts next to, so a page still
+cannot repeat or skip a row. What it costs is that rows written in one batch come back in an
+arbitrary order among themselves rather than in insertion order.
+
 ---
 
 ## 5. Errors
@@ -209,7 +310,9 @@ on purpose: the adjudicated narrative is not the same material as a scan's statu
 dotnet test SentinelAI.slnx --filter "ReadApi|AuditStage"
 ```
 
-43 tests: 15 tenant isolation, 8 contract, 14 paging/errors, 6 audit stage.
+71 tests: 15 tenant isolation, 8 contract, 14 paging/errors, 6 audit stage, 28 list endpoints
+(`ListEndpointTests`, which also covers `GET /v1/projects/{id}`, `GET /v1/account` and
+`GET /v1/health`).
 
 | Acceptance criterion | Proved by |
 |---|---|
@@ -217,6 +320,8 @@ dotnet test SentinelAI.slnx --filter "ReadApi|AuditStage"
 | Report returns `draft_audit` and per-chain confidence | `The_report_carries_draft_audit_framing_and_per_chain_confidence` |
 | Every endpoint tenant-scoped | `ReadApiTenantIsolationTests`, a theory over every route |
 | Every endpoint paginated | `Walking_the_cursor_returns_every_finding_exactly_once` — and §3's stated exception for the graph |
+| A list never returns another tenant's row | `The_scan_list_never_returns_another_tenants_scan`, which asserts the **absence** of a row in a 200 |
+| A summary total equals a walk of the pages | `The_summary_total_matches_a_full_walk_of_the_paged_findings` |
 
 ---
 
@@ -232,3 +337,11 @@ dotnet test SentinelAI.slnx --filter "ReadApi|AuditStage"
   separate change.
 - **Chain hops carry `node_key` only when the hop has an edge.** The seed hop arrived from
   nowhere, so its node cannot be derived from an edge that does not exist.
+- **No total on the list endpoints.** `GET /v1/scans` and `GET /v1/reports` return a page and a
+  cursor, not a count. `GET /v1/scans/{id}/summary` counts one scan's contents; there is no
+  equivalent for "how many scans does this tenant have". Add it as a dedicated endpoint if a
+  screen needs one — do not infer it by walking pages and calling the result a total.
+- **`repo_url` on a list row is the repository's URL *now*.** It is joined from the project, so a
+  repository that was renamed shows its current URL against an older scan. That is the right
+  answer for a list whose job is recognition; the immutable record of what was scanned is
+  `GET /v1/scans/{id}/bundle`.

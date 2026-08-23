@@ -409,6 +409,8 @@ namespace SentinelAI.Infrastructure.Migrations
 
                     b.HasIndex("TenantId");
 
+                    b.HasIndex("TenantId", "CreatedAt", "Id");
+
                     b.ToTable("Reports");
                 });
 
@@ -845,6 +847,91 @@ namespace SentinelAI.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SentinelAI.Domain.Models.ScanAuditIntegrity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AbandonedReasoningDetail")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("AbandonedReasoningWarnings")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Adjudicated")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("CandidateChains")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ChainsAdjudicated")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CorpusVersion")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("CoveragePercent")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("EdgeIntegrityDetail")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("EdgeIntegrityWarnings")
+                        .HasColumnType("int");
+
+                    b.Property<int>("HarnessVersion")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ModesThatDidNotFire")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("RetrievalFindings")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RetrievalGrounded")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Rounds")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ScanJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("TerminatedByTurnCap")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("VerdictReadable")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("WeakestJoin")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ScanJobId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("ScanAuditIntegrities");
+                });
+
             modelBuilder.Entity("SentinelAI.Domain.Models.ScanBundle", b =>
                 {
                     b.Property<Guid>("Id")
@@ -961,7 +1048,102 @@ namespace SentinelAI.Infrastructure.Migrations
 
                     b.HasIndex("TriggeringUserId");
 
+                    b.HasIndex("TenantId", "StartedAt", "Id");
+
                     b.ToTable("ScanJobs");
+                });
+
+            modelBuilder.Entity("SentinelAI.Domain.Models.ScanQuotaCounter", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Count")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly>("UtcDay")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("TenantId", "UtcDay")
+                        .IsUnique();
+
+                    b.ToTable("ScanQuotaCounters");
+                });
+
+            modelBuilder.Entity("SentinelAI.Domain.Models.Subscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("CancelAtPeriodEnd")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("CurrentPeriodEnd")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("LastEventAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Period")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("PlanId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("StripeCustomerId")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("StripePriceId")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("StripeSubscriptionId")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("TrialEnd")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StripeCustomerId")
+                        .IsUnique()
+                        .HasFilter("[StripeCustomerId] IS NOT NULL");
+
+                    b.HasIndex("StripeSubscriptionId");
+
+                    b.HasIndex("TenantId")
+                        .IsUnique();
+
+                    b.ToTable("Subscriptions");
                 });
 
             modelBuilder.Entity("SentinelAI.Domain.Models.Tenant", b =>
@@ -1156,6 +1338,17 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.Navigation("ScanJob");
                 });
 
+            modelBuilder.Entity("SentinelAI.Domain.Models.ScanAuditIntegrity", b =>
+                {
+                    b.HasOne("SentinelAI.Domain.Models.ScanJob", "ScanJob")
+                        .WithOne()
+                        .HasForeignKey("SentinelAI.Domain.Models.ScanAuditIntegrity", "ScanJobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ScanJob");
+                });
+
             modelBuilder.Entity("SentinelAI.Domain.Models.ScanBundle", b =>
                 {
                     b.HasOne("SentinelAI.Domain.Models.ScanJob", "ScanJob")
@@ -1182,6 +1375,28 @@ namespace SentinelAI.Infrastructure.Migrations
                     b.Navigation("Project");
 
                     b.Navigation("TriggeringUser");
+                });
+
+            modelBuilder.Entity("SentinelAI.Domain.Models.ScanQuotaCounter", b =>
+                {
+                    b.HasOne("SentinelAI.Domain.Models.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("SentinelAI.Domain.Models.Subscription", b =>
+                {
+                    b.HasOne("SentinelAI.Domain.Models.Tenant", "Tenant")
+                        .WithOne("Subscription")
+                        .HasForeignKey("SentinelAI.Domain.Models.Subscription", "TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
                 });
 
             modelBuilder.Entity("SentinelAI.Domain.Models.User", b =>
@@ -1250,6 +1465,8 @@ namespace SentinelAI.Infrastructure.Migrations
             modelBuilder.Entity("SentinelAI.Domain.Models.Tenant", b =>
                 {
                     b.Navigation("Projects");
+
+                    b.Navigation("Subscription");
 
                     b.Navigation("Users");
                 });

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using SentinelAI.Application.Features.Scan.Security;
 using SentinelAI.Infrastructure.Agents.Orchestration;
 using SentinelAI.Infrastructure.Agents.Providers;
+using SentinelAI.Infrastructure.Observability;
 
 namespace SentinelAI.Infrastructure.Security;
 
@@ -51,6 +52,24 @@ public sealed class ConfiguredOutboundEndpoints : IOutboundEndpointCatalog
         }
 
         Add(endpoints, KnowledgeEndpointKey, configuration[KnowledgeEndpointKey], EgressPurpose.Rag);
+
+        // SEC-36's collector — reported only when the traces carry prompts and completions.
+        //
+        // The distinction is the whole of this block's correctness. A metadata-only trace holds
+        // a token count, a tier, a latency and a role name: none of it is the customer's, and
+        // requiring an allowlist entry for it would push operators to leave observability off,
+        // or to add a blanket host and mean nothing by it. A trace carrying the prompts is a
+        // second destination for job content beside the model provider, and it belongs in front
+        // of the same check the provider endpoint passes.
+        var tracing = TracingOptionsLoader.Load(configuration);
+
+        if (tracing.CaptureContent)
+        {
+            Add(endpoints,
+                $"{TracingOptions.SectionName}:OtlpEndpoint",
+                tracing.OtlpEndpoint,
+                EgressPurpose.Telemetry);
+        }
 
         Endpoints = endpoints;
     }

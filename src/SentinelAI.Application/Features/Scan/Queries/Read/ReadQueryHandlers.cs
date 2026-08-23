@@ -49,6 +49,28 @@ internal static class ReadGuard
 
         return (null, tenantId);
     }
+
+    /// <summary>
+    /// Confirms the caller may read, without naming a particular resource. For the list endpoints,
+    /// which have no id to check ownership of — the tenant they return <em>is</em> the answer.
+    /// </summary>
+    /// <remarks>
+    /// Split out rather than folded into <see cref="AuthorizeScanAsync"/> with a nullable id, so
+    /// that the per-resource ownership check cannot be skipped by passing null. A guard that does
+    /// less when an argument is absent is a guard someone will eventually call with the argument
+    /// absent by accident.
+    /// </remarks>
+    public static async Task<(Response? Failure, Guid TenantId)> AuthorizeTenantAsync(
+        ICallerContext caller, string scope)
+    {
+        if (!caller.IsAuthenticated || caller.TenantId is null)
+            return (await Response.FailureAsync("a valid token is required", HttpStatusCode.Unauthorized), Guid.Empty);
+
+        if (!caller.HasScope(scope))
+            return (await Response.FailureAsync($"the '{scope}' scope is required", HttpStatusCode.Forbidden), Guid.Empty);
+
+        return (null, caller.TenantId.Value);
+    }
 }
 
 // ---- bundle ----------------------------------------------------------------------------
@@ -127,14 +149,22 @@ public sealed class GetFindingsQueryHandler(IUnitOfWork unitOfWork, ICallerConte
     }
 
     internal static CursorPage<TView> Page<TRow, TView>(
-        List<TRow> rows, int limit, Func<TRow, Guid> idOf, Func<TRow, TView> project)
+        List<TRow> rows, int limit, Func<TRow, Guid> idOf, Func<TRow, TView> project) =>
+        Page(rows, limit, row => Cursor.Encode(idOf(row)), project);
+
+    /// <summary>
+    /// The same paging for a list whose cursor is not a bare id — see
+    /// <see cref="Cursor.Encode(DateTime, Guid)"/> for why a time-ordered list needs one.
+    /// </summary>
+    internal static CursorPage<TView> Page<TRow, TView>(
+        List<TRow> rows, int limit, Func<TRow, string> cursorOf, Func<TRow, TView> project)
     {
         var hasMore = rows.Count > limit;
         var items = hasMore ? rows.Take(limit).ToList() : rows;
 
         return CursorPage<TView>.Of(
             [.. items.Select(project)],
-            hasMore && items.Count > 0 ? Cursor.Encode(idOf(items[^1])) : null,
+            hasMore && items.Count > 0 ? cursorOf(items[^1]) : null,
             limit);
     }
 }
@@ -290,5 +320,54 @@ public sealed class GetReportQueryHandler(IUnitOfWork unitOfWork, ICallerContext
         };
 
         return await Response.SuccessAsync(view, "draft audit", HttpStatusCode.OK);
+    }
+}
+
+// ---- audit integrity (admin) -----------------------------------------------------------
+
+/// <summary>
+/// Reads one scan's integrity record. Admin only.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The role gate is applied <em>after</em> <see cref="ReadGuard.AuthorizeScanAsync"/>, and the
+/// order is the point: another tenant's scan id is answered 404 by the guard before the role is
+/// ever consulted, so an admin cannot use this to discover which scan ids exist elsewhere. A role
+/// check first would turn the endpoint into an existence oracle for anyone holding the role.
+/// </para>
+/// <para>
+/// A scan with no record yet is a 404 rather than an empty object. The row is written at the end
+/// of the audit stage, so its absence means the scan has not been adjudicated yet — which is a
+/// different answer from "adjudicated, nothing to report", and the two must not render alike.
+/// </para>
+/// </remarks>
+public sealed class GetAuditIntegrityQueryHandler(IUnitOfWork unitOfWork, ICallerContext caller)
+    : IRequestHandler<GetAuditIntegrityQuery, Response>
+{
+    public async Task<Response> Handle(GetAuditIntegrityQuery request, CancellationToken ct)
+    {
+        var (failure, _) = await ReadGuard.AuthorizeScanAsync(unitOfWork, caller, request.ScanJobId, ct);
+        if (failure is not null) return failure;
+
+        if (caller.Role != Roles.Admin)
+        {
+            return await Response.FailureAsync(
+                "reading a scan's integrity record requires the admin role",
+                HttpStatusCode.Forbidden);
+        }
+
+        var row = await unitOfWork.Repository<ScanAuditIntegrity>()
+            .GetTableAsNotTracked()
+            .FirstOrDefaultAsync(a => a.ScanJobId == request.ScanJobId, ct);
+
+        if (row is null)
+        {
+            return await Response.FailureAsync(
+                $"scan '{request.ScanJobId}' has no integrity record; it has not been audited yet",
+                HttpStatusCode.NotFound);
+        }
+
+        return await Response.SuccessAsync(
+            AuditIntegrityView.From(row), "audit integrity", HttpStatusCode.OK);
     }
 }

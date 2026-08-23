@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Buffers.Text;
 using System.Text.Json.Serialization;
 
@@ -49,9 +50,24 @@ public sealed record CursorPage<T>
 /// which is why every query still filters by tenant and scan job independently of it.
 /// </para>
 /// <para>
-/// Keyset paging on the id works here because every id is <c>Guid.CreateVersion7</c> — UUIDv7 is
-/// time-ordered, so ordering by id is both stable and chronological. With random UUIDv4 keys
-/// this technique would produce an arbitrary order, and "the next page" would mean nothing.
+/// Keyset paging on the id is <b>stable</b> because every id is <c>Guid.CreateVersion7</c> and the
+/// <c>WHERE</c> and <c>ORDER BY</c> use the same comparison, so a page never repeats or skips a
+/// row. That is all a per-scan list needs, and it is why <c>/findings</c> and <c>/chains</c> page
+/// this way.
+/// </para>
+/// <para>
+/// It is <b>not chronological on SQL Server</b>, and an earlier version of this comment said it
+/// was. UUIDv7 is time-ordered in its bytes, but <c>uniqueidentifier</c> collation compares the
+/// trailing node bytes before the leading timestamp bytes, so <c>ORDER BY Id</c> is close to
+/// random with respect to time. Two v7 ids demonstrate it: <c>01a025b8-…-ffffffffffff</c> was
+/// generated before <c>01a025b9-…-000000000000</c>, and SQL Server sorts the later one first.
+/// Nothing in the test suite catches this — the integration tests run on the EF in-memory
+/// provider, where <c>Guid.CompareTo</c> gives a third order again.
+/// </para>
+/// <para>
+/// So any list that promises an order <em>by time</em> — the scan history, the audit list — must
+/// page on its timestamp with the id only as a tiebreak. See
+/// <see cref="Cursor.Encode(DateTime, Guid)"/>.
 /// </para>
 /// </remarks>
 public static class Cursor
@@ -98,4 +114,58 @@ public static class Cursor
             return false;
         }
     }
+
+    /// <summary>
+    /// Encodes a keyset cursor over <c>(timestamp, id)</c> — for a list ordered by time rather
+    /// than by id. Twenty-four bytes: eight of ticks, sixteen of guid.
+    /// </summary>
+    /// <remarks>
+    /// See this type's remarks for why the single-id form cannot carry a chronological order on
+    /// SQL Server. The id is still here, as the tiebreak between two rows sharing a timestamp;
+    /// it decides nothing on its own.
+    /// </remarks>
+    public static string Encode(DateTime lastTimestampUtc, Guid lastId)
+    {
+        Span<byte> bytes = stackalloc byte[CompositeLength];
+        BinaryPrimitives.WriteInt64BigEndian(bytes, lastTimestampUtc.Ticks);
+        lastId.TryWriteBytes(bytes[sizeof(long)..]);
+
+        return Base64Url.EncodeToString(bytes);
+    }
+
+    /// <summary>
+    /// Reads a composite cursor.
+    /// </summary>
+    /// <remarks>
+    /// A cursor of any other length — notably the sixteen-byte <see cref="Encode(Guid)"/> form —
+    /// is refused rather than reinterpreted. Both are opaque base64url to a caller, so pasting one
+    /// where the other belongs is an easy mistake; length is what makes it a 400 instead of a page
+    /// of plausible-looking wrong rows.
+    /// </remarks>
+    public static bool TryDecode(string? cursor, out DateTime lastTimestampUtc, out Guid lastId)
+    {
+        lastTimestampUtc = default;
+        lastId = Guid.Empty;
+        if (string.IsNullOrWhiteSpace(cursor)) return false;
+
+        try
+        {
+            var bytes = Base64Url.DecodeFromChars(cursor);
+            if (bytes.Length != CompositeLength) return false;
+
+            var ticks = BinaryPrimitives.ReadInt64BigEndian(bytes);
+            if (ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks) return false;
+
+            lastTimestampUtc = new DateTime(ticks, DateTimeKind.Utc);
+            lastId = new Guid(bytes.AsSpan(sizeof(long)));
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Eight bytes of ticks followed by sixteen of guid.</summary>
+    private const int CompositeLength = sizeof(long) + 16;
 }

@@ -1,6 +1,8 @@
 using Microsoft.Agents.AI;
+using SentinelAI.Application.Debate;
 using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
+using SentinelAI.Infrastructure.Observability;
 
 namespace SentinelAI.Infrastructure.Agents.Executors;
 
@@ -9,8 +11,8 @@ namespace SentinelAI.Infrastructure.Agents.Executors;
 /// (AID-01 3.1 — the false-positive reducer). Its verdict drives the loop: if Blue
 /// cannot break a link the debate has converged and moves to the Reporter.
 /// </summary>
-public sealed class BlueTeamExecutor(AIAgent agent, ModelTier tier = ModelTier.High)
-    : DebateExecutor(ExecutorId, agent, AgentRole.Blue, tier)
+public sealed class BlueTeamExecutor(AIAgent agent, ModelTier tier = ModelTier.High, TurnTracing? tracing = null)
+    : DebateExecutor(ExecutorId, agent, AgentRole.Blue, tier, tracing)
 {
     /// <summary>Node id in the workflow graph. Named to avoid shadowing <c>Executor.Id</c>.</summary>
     public const string ExecutorId = "blue-team";
@@ -37,12 +39,16 @@ public sealed class BlueTeamExecutor(AIAgent agent, ModelTier tier = ModelTier.H
         and a hop you merely could not check does not break the chain. Only a REFUTED hop
         breaks it.
 
-        For a CONFIRMED hop, name the specific evidence — the node, finding or config detail —
-        that confirms it. A CONFIRMED hop with no named evidence is not confirmed, it is
-        asserted twice.
+        Write one line per hop, in exactly this shape, in the order Red asserted them:
+          HOP <n>: <from> -> <to> | <CONFIRMED|UNRESOLVED|REFUTED> | <evidence>
+        Use the graph's own N-labels for <from> and <to>, the same ones Red used.
 
-        Be terse: at most one short line per hop, each ending in CONFIRMED, UNRESOLVED or
-        REFUTED. No preamble, no restating the chain.
+        For <evidence>, name the specific fact — the finding id, config detail or piece of
+        contradicting evidence — that settles the hop. A CONFIRMED hop with no named evidence
+        is not confirmed, it is asserted twice; an UNRESOLVED one must say what is missing,
+        and a REFUTED one must say what contradicts it.
+
+        Be terse: one short line per hop, no preamble, no restating the chain, no markdown.
 
         Your final line MUST be exactly one of these two tokens and nothing else:
         VERDICT: CHAIN_HOLDS
@@ -72,10 +78,10 @@ public sealed class BlueTeamExecutor(AIAgent agent, ModelTier tier = ModelTier.H
         $"""
         {state.ResourceGraph}
 
-        Round {incoming.Round}. Validate hop by hop, one short line each.
+        Round {incoming.Round}. Validate hop by hop, one HOP line each.
         {Quote(incoming.Role, incoming.Content)}
 
-        End with exactly "{HoldsVerdict}" or "{BrokenVerdict}".
+        End with exactly "{HoldsVerdict}" or "{BrokenVerdict}" on its own line.
         """;
 
     protected override DebateTurn Interpret(string rawContent, DebateTurn incoming, DebateState state)
@@ -118,22 +124,20 @@ public sealed class BlueTeamExecutor(AIAgent agent, ModelTier tier = ModelTier.H
     /// otherwise, once a verdict token exists everything before the line carrying it is
     /// preamble and is discarded. If no token is present the text is returned untouched so
     /// the natural-language fallbacks in <see cref="ReadVerdict"/> still get a chance.
+    /// <para>
+    /// The scratchpad and markdown removal is <see cref="TranscriptText.Clean"/>'s, shared with
+    /// the other three agents, and runs first: a verdict token wrapped in <c>**bold**</c> or
+    /// sitting under a <c>###</c> heading is a token this method would otherwise search for
+    /// while looking straight at it. Blank lines are then dropped so the budget below counts
+    /// hops rather than the spacing between them.
+    /// </para>
     /// </remarks>
-    internal static string StripReasoning(string content)
+    internal static string StripReasoning(string rawContent)
     {
-        if (string.IsNullOrWhiteSpace(content)) return string.Empty;
+        var content = TranscriptText.Clean(rawContent);
+        if (content.Length == 0) return string.Empty;
 
-        // Drop <think>…</think>, including an unclosed block left by a truncated response.
-        var open = content.IndexOf("<think>", StringComparison.OrdinalIgnoreCase);
-        if (open >= 0)
-        {
-            var close = content.IndexOf("</think>", open, StringComparison.OrdinalIgnoreCase);
-            content = close >= 0
-                ? content[..open] + content[(close + "</think>".Length)..]
-                : content[..open];
-        }
-
-        var lines = content.Split('\n');
+        var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         var verdictLine = Array.FindLastIndex(
             lines,
             l => l.Contains("CHAIN_HOLDS", StringComparison.OrdinalIgnoreCase)

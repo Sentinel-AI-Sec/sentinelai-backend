@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using SentinelAI.Api.Configuration;
 
 namespace SentinelAI.Api;
 
@@ -136,6 +137,8 @@ public static class DependencyInjection
 
     public static WebApplication UseApiServices(this WebApplication app)
     {
+        LogSecretSource(app);
+
         // ---- SEC-35: encryption in transit ------------------------------------------------
         // A scan bundle carries a customer's infrastructure configuration and a bearer token
         // rides on every request; both are readable by anyone on the path if this is off.
@@ -176,5 +179,56 @@ public static class DependencyInjection
         app.MapControllers();
 
         return app;
+    }
+
+    /// <summary>
+    /// Says, once, where this instance's secrets came from (SEC-35, audit 35-A).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The most common way a Key Vault integration is wrong is that it is silently not
+    /// running.</b> Nothing throws: the vault is skipped, the committed defaults apply, and the
+    /// symptom is an empty signing key or an absent provider credential surfacing somewhere
+    /// else entirely. One line at startup turns "we use Key Vault" from a belief into an
+    /// observation.
+    /// </para>
+    /// <para>
+    /// A configured vault that loaded <em>zero</em> secrets is called out at warning. It is not
+    /// an error — an empty vault is a legitimate state — but it is almost always a permissions
+    /// problem on the managed identity, and it looks identical to success everywhere else.
+    /// </para>
+    /// </remarks>
+    private static void LogSecretSource(WebApplication app)
+    {
+        var result = app.Services.GetService<KeyVaultLoadResult>() ?? KeyVaultLoadResult.NotConfigured;
+        var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("SentinelAI.Secrets");
+
+        if (!result.Enabled)
+        {
+            logger.LogInformation(
+                "No key vault configured ({Key} is empty); secrets come from configuration files, "
+                + "environment variables and user-secrets", $"{KeyVaultOptions.SectionName}:Uri");
+
+            return;
+        }
+
+        if (result.SecretCount == 0)
+        {
+            logger.LogWarning(
+                "Key vault {Vault} is configured but returned no secrets. The application is "
+                + "running on its committed defaults. This is usually a missing 'Key Vault "
+                + "Secrets User' role assignment on the managed identity rather than an empty "
+                + "vault", result.VaultUri);
+
+            return;
+        }
+
+        logger.LogInformation(
+            "Secrets loaded from key vault {Vault}: {Count} secret(s), {Aliases} resolved through "
+            + "an explicit name mapping, reload {Reload}",
+            result.VaultUri,
+            result.SecretCount,
+            result.AliasCount,
+            result.ReloadInterval is { } interval ? $"every {interval.TotalMinutes:0} minute(s)" : "off");
     }
 }

@@ -1,7 +1,10 @@
+using System.Globalization;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SentinelAI.Api.Problems;
+using SentinelAI.Application.Common.Behaviors;
+using SentinelAI.Application.Features.Scan.Commands.Dispatch;
 using SentinelAI.Application.Features.Scan.Commands.Purge;
 using SentinelAI.Application.Features.Scan.Commands.RunAudit;
 using SentinelAI.Application.Features.Scan.Commands.RunGraph;
@@ -40,6 +43,44 @@ public class ScanController(ISender sender) : ControllerBase
         await using var bundleStream = request.Bundle.OpenReadStream();
 
         var response = await sender.Send(new SubmitScanCommand(request.Metadata, bundleStream), ct);
+
+        // The quota behavior answers 429 with the reset in the body, because Response carries no
+        // headers and Application does not get to know about them. Lifting it onto Retry-After
+        // here is what the API design document specifies, and it is the difference between a CI
+        // runner backing off until midnight and one retrying in a tight loop until it gives up.
+        if (response.Data is QuotaExceeded quota)
+            Response.Headers.RetryAfter = quota.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+
+        return StatusCode((int)response.StatusCode, response);
+    }
+
+    /// <summary>
+    /// Starts a scan of a registered project's branch, without the caller supplying a bundle.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The counterpart to <see cref="Submit"/> for people rather than for CI. <c>POST /v1/scans</c>
+    /// takes a commit sha, a PR ref, a scanner-version map and a <c>.tar.gz</c> of scanner output,
+    /// because the GitHub Action is what fills those in; asking a human for them is asking them to
+    /// be a CI runner. This takes a project and, optionally, a branch.
+    /// </para>
+    /// <para>
+    /// <b>It answers <c>202</c> with no scan job id, and that is not an omission.</b> The scan job
+    /// does not exist yet — CI has been asked to run, and will upload its bundle through
+    /// <see cref="Submit"/> minutes later, exactly as a pull request does. The console finds the
+    /// resulting job by listing the project's scans. An id invented here would be one the screen
+    /// polls forever if CI declines the run.
+    /// </para>
+    /// <para>
+    /// A signed-in user, never the Action's machine token: that token exists to upload a scan CI
+    /// has already run, and letting it ask for another one is a loop with a scan job at every turn.
+    /// </para>
+    /// </remarks>
+    [HttpPost("dispatch")]
+    public async Task<IActionResult> Dispatch(
+        [FromBody] DispatchScanCommand command, CancellationToken ct)
+    {
+        var response = await sender.Send(command, ct);
 
         return StatusCode((int)response.StatusCode, response);
     }
@@ -99,11 +140,63 @@ public class ScanController(ISender sender) : ControllerBase
     }
 
     // ---- SEC-40: the read API -------------------------------------------------------------
-    // These four differ from everything above in how they answer: bare snake_case JSON on
+    // Everything below differs from everything above in how it answers: bare snake_case JSON on
     // success (the shape SentinelAI_API_Design_V2.1.md fixes and the Angular screen is built
     // against) and RFC 7807 problem+json on failure, rather than the Response envelope. The
     // envelope is unwrapped here at the edge; the handlers still return Response like every
     // other feature, so the Application layer stays free of HTTP representation concerns.
+    //
+    // 'List' and 'GetSummary' were added after the original four. They join this half rather
+    // than the envelope half above because they are read shapes a screen renders, and splitting
+    // the read API across two response formats by date of addition would be the worst of both.
+
+    /// <summary>
+    /// A page of this tenant's scans, newest first. Filter with <c>?project_id=</c>,
+    /// <c>?status=</c> (queued|running|completed|failed) and <c>?stage=</c>
+    /// (received|normalize|graph|retrieve|debate|report); page with <c>?cursor=</c> and
+    /// <c>?limit=</c>.
+    /// </summary>
+    /// <remarks>
+    /// This shares a route template with <c>POST /v1/scans</c> and differs only by verb, and it
+    /// cannot collide with <c>GET /v1/scans/{id}</c> either: that route's <c>:guid</c> constraint
+    /// matches only a segment that parses as a GUID, and this one has no segment at all.
+    /// </remarks>
+    [HttpGet]
+    public async Task<IActionResult> List(
+        [FromQuery] string? cursor,
+        [FromQuery] int? limit,
+        [FromQuery(Name = "project_id")] Guid? projectId,
+        [FromQuery] string? status,
+        [FromQuery] string? stage,
+        CancellationToken ct) =>
+        Render(await sender.Send(new ListScansQuery(cursor, limit, projectId, status, stage), ct));
+
+    /// <summary>
+    /// Counts for one scan: findings by layer and severity, the graph's size, chains by status.
+    /// </summary>
+    /// <remarks>
+    /// The total the paged endpoints cannot give. A cursor-paged response knows only what it
+    /// returned, so a screen filtering findings can honestly say how many rows it has loaded and
+    /// not how many exist — this endpoint is where that number comes from.
+    /// </remarks>
+    [HttpGet("{id:guid}/summary")]
+    public async Task<IActionResult> GetSummary(Guid id, CancellationToken ct) =>
+        Render(await sender.Send(new GetScanSummaryQuery(id), ct));
+
+    /// <summary>
+    /// What could be checked about this scan's own reasoning. Admin only.
+    /// </summary>
+    /// <remarks>
+    /// <b>An operator surface, not a customer one.</b> It is absent from the UI's wire types and
+    /// gated on the admin role, because every number here is about whether the run behaved rather
+    /// than about whether the findings are real. A customer reading "2 edge integrity warnings" on
+    /// their own audit would reasonably conclude they had been told their infrastructure was safe
+    /// when the product was not sure — when what happened is a check caught a model overstating
+    /// itself and the chain was capped for it.
+    /// </remarks>
+    [HttpGet("{id:guid}/audit-integrity")]
+    public async Task<IActionResult> GetAuditIntegrity(Guid id, CancellationToken ct) =>
+        Render(await sender.Send(new GetAuditIntegrityQuery(id), ct));
 
     /// <summary>Provenance of the bundle the runner uploaded. Survives the bundle's purge.</summary>
     [HttpGet("{id:guid}/bundle")]

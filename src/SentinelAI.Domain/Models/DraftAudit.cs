@@ -18,11 +18,28 @@ public sealed record DraftAudit
     public bool VerdictReadable { get; init; } = true;
 
     /// <summary>
+    /// Whether a debate ran at all. False on a plan without adjudication.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to true so every existing construction site keeps its meaning: an audit that came
+    /// out of a debate does not have to say so.
+    /// </remarks>
+    public bool Adjudicated { get; init; } = true;
+
+    /// <summary>
     /// The honest one-word answer to "how did this end?". Checked most-doubtful first, so
     /// an unparseable verdict can never be reported as a convergence.
     /// </summary>
+    /// <remarks>
+    /// <see cref="Adjudicated"/> is checked ahead of everything, because "no debate ran" is more
+    /// doubtful than any outcome of one. Without it a skipped debate falls through this expression
+    /// to <see cref="DebateOutcome.ChainBroken"/> — <see cref="Converged"/> is false, after all —
+    /// and <c>ChainOutcomeWriter</c> then writes <c>Rejected</c> onto a chain nobody examined,
+    /// fabricating a refutation out of a billing decision.
+    /// </remarks>
     public DebateOutcome Outcome =>
-        !VerdictReadable ? DebateOutcome.VerdictUnreadable
+        !Adjudicated ? DebateOutcome.NotAdjudicated
+        : !VerdictReadable ? DebateOutcome.VerdictUnreadable
         : TerminatedByTurnCap ? DebateOutcome.TurnCapped
         : Converged ? DebateOutcome.Converged
         : DebateOutcome.ChainBroken;

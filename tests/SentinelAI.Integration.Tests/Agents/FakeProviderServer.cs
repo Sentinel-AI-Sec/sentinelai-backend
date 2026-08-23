@@ -106,14 +106,51 @@ internal sealed class FakeProviderServer : HttpMessageHandler
     /// What this provider "says". Blue converges on the first round, so a debate driven by
     /// this server terminates through the convergence path rather than the turn cap.
     /// </summary>
+    /// <remarks>
+    /// Written in the labelled line shape each role's <c>Instructions</c> mandate — a fake
+    /// provider that answers in a format no real one is asked for stops standing in for one.
+    /// The wording still differs from <c>ScriptedChatClient</c>'s, which is the point of the
+    /// provider-parity tests: same debate, same shape of audit, different words.
+    /// </remarks>
     private static string CannedReplyFor(AgentRole? role) => role switch
     {
-        AgentRole.Orchestrator => "SEQUENCE: seed from the CWE-502 finding; Red asserts first.",
-        AgentRole.Red => "ASSERT: pkg:newtonsoft.json:9.0.1 -> code:orderservice.deserialize "
-                         + "-> task:ecs-task/api-service -> s3:customer-data-bucket.",
-        AgentRole.Blue => "VALIDATE: every hop confirmed against the supplied configuration. "
-                          + BlueTeamExecutor.ConvergenceMarker,
-        AgentRole.Reporter => "ADJUDICATE: chain survives. Severity HIGH.",
+        AgentRole.Orchestrator =>
+            """
+            TARGET: N8, the customer-data-bucket.
+            LEAD: F1 — the CWE-502 deserialization gadget chain.
+            ROUTE: dependency to code to the running task to the bucket.
+            WEAK JOIN: N2 -> N4, joined by image tag rather than digest.
+            """,
+
+        AgentRole.Red =>
+            """
+            HOP 1: N1 -> used-by -> N2 | none | the lock file pins the vulnerable version
+            HOP 2: N2 -> deployed-as -> N4 | none | the task definition references the image
+            HOP 3: N4 -> assumes -> N6 | none | taskRoleArn names the role
+            HOP 4: N6 -> can-access -> N8 | none | the inline policy grants s3:GetObject
+            CHAIN: N1 -> N2 -> N4 -> N6 -> N8
+            IMPACT: the deserialization sink ends at customer data.
+            """,
+
+        AgentRole.Blue =>
+            $"""
+            HOP 1: N1 -> N2 | CONFIRMED | the lock file names the gadget class
+            HOP 2: N2 -> N4 | CONFIRMED | the task definition references the image
+            HOP 3: N4 -> N6 | CONFIRMED | taskRoleArn names the role outright
+            HOP 4: N6 -> N8 | CONFIRMED | the inline policy grants the action
+            {BlueTeamExecutor.HoldsVerdict}
+            """,
+
+        AgentRole.Reporter =>
+            """
+            CHAIN: N1 -> N2 -> N4 -> N6 -> N8
+            SEVERITY: high — the chain reaches the crown jewel
+            CONFIDENCE: certain — no join was left unresolved
+            IMPACT: read and write access to customer data.
+            EVIDENCE: F1 for the gadget chain, F4 for the bucket grant
+            NEXT: pin the deployed image by digest.
+            """,
+
         _ => "ACK."
     };
 

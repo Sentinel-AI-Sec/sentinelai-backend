@@ -15,6 +15,10 @@ public static class DependencyInjection
         services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
 
+        // After validation, and the order matters: registration order is execution order, so a
+        // malformed submission is refused as a 400 before it can spend a customer's daily quota.
+        services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ScanQuotaBehavior<,>));
+
         services.AddScoped<AuthTokenFactory>();
 
         // SEC-14: the Normalize stage. Its IFindingExtractor set is supplied by Infrastructure.
@@ -61,6 +65,7 @@ public static class DependencyInjection
         // stage left at Candidate, so GET /v1/scans/{id}/chains reflects what Red and Blue
         // actually concluded rather than showing every chain untouched forever.
         services.AddScoped<Features.Scan.Graph.ChainOutcomeWriter>();
+        services.AddScoped<Features.Scan.Audit.AuditIntegrityWriter>();
 
         // The graph stage as one callable unit — the four seam writers plus SEC-20 over one
         // ingested bundle. POST /v1/scans/{id}/graph is its only caller today; a queue-driven

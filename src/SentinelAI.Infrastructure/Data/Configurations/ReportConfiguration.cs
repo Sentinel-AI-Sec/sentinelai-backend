@@ -23,6 +23,9 @@ public class ReportConfiguration : IEntityTypeConfiguration<Report>
 
     public void Configure(EntityTypeBuilder<Report> builder)
     {
+        // The keyset for GET /v1/reports, matching its WHERE and ORDER BY.
+        builder.HasIndex(r => new { r.TenantId, r.CreatedAt, r.Id });
+
         builder.Property(r => r.CostCurrency).HasMaxLength(3);
 
         builder.Property(r => r.HighTierCost).HasPrecision(18, CostScale);

@@ -2,10 +2,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SentinelAI.Application.Abstractions;
+using SentinelAI.Application.Abstractions.Billing;
 using SentinelAI.Application.Features.Scan.Security;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Abstractions.Repositories;
 using SentinelAI.Infrastructure.Agents;
+using SentinelAI.Infrastructure.Billing;
 using SentinelAI.Infrastructure.Data;
 using SentinelAI.Infrastructure.Graph;
 using SentinelAI.Infrastructure.Knowledge;
@@ -161,11 +163,72 @@ public static class DependencyInjection
         // rebuilding the container.
         services.Configure<ScanWorkerOptions>(configuration.GetSection(ScanWorkerOptions.SectionName));
         services.AddScoped<IScanJobClaim, SqlScanJobClaim>();
+
+        // Starting a scan from the console (SEC-43 counterpart): the API asks the repository's own
+        // CI to run the scan workflow, rather than cloning customer code and running scanners
+        // itself. A typed HttpClient because it is one POST to api.github.com; the token is read
+        // per call from IOptionsMonitor so a rotation needs no restart.
+        services.Configure<GitHubDispatchOptions>(configuration.GetSection(GitHubDispatchOptions.SectionName));
+        services.AddHttpClient<IScanDispatcher, GitHubScanDispatcher>(client =>
+        {
+            // GitHub rejects a request with no User-Agent outright.
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("SentinelAI");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
         services.AddHostedService<ScanPipelineWorker>();
 
         services.AddScoped<IScanJobRepository, ScanJobRepository>();
         services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
         services.AddScoped<IUnitOfWork, UnitOfWork>();
+
+        // ---- Billing: subscriptions through Stripe Checkout -------------------------------
+        // Vendor-neutral above this line: Application takes IBillingGateway and
+        // IBillingEventReader, so the checkout, portal and webhook handlers are testable with a
+        // fake and no Stripe account. StripeBillingGateway is the only class that calls Stripe.
+        //
+        // BillingSettings is a singleton read once at registration, the same shape EgressPolicy
+        // uses: Infrastructure owns configuration, Application gets a settled answer. Registering
+        // it unconditionally matters — a deployment with no Stripe account is a supported state,
+        // and the endpoints answer 503 with an honest reason rather than failing to resolve.
+        services.Configure<StripeOptions>(configuration.GetSection(StripeOptions.SectionName));
+
+        services.AddSingleton(_ => BillingSettingsLoader.Load(configuration));
+
+        // Both gateways are registered and the choice is made when one is first resolved, not here.
+        //
+        // Reading the provider at registration time would settle it against whatever configuration
+        // looked like at that moment, which is before any source layered on afterwards has been
+        // merged -- the same trap AddDebateServices documents for the model options, and the reason
+        // ScanApiFactory has to replace built registrations rather than override config for those.
+        // A deployment never notices the difference; a test that configures a provider notices
+        // immediately, because it silently gets the other one.
+        //
+        // Simulated is what the committed appsettings.json asks for, so a fresh clone can demo an
+        // upgrade end to end with no Stripe account. The deployed app overrides it with
+        // Billing__Provider=Stripe, exactly as it already overrides SentinelAI__Models__Provider.
+        services.AddScoped<StripeBillingGateway>();
+        services.AddScoped<SimulatedBillingGateway>();
+        services.AddScoped<StripeEventReader>();
+        services.AddScoped<SimulatedBillingEventReader>();
+
+        services.AddScoped<IBillingGateway>(sp =>
+            sp.GetRequiredService<BillingSettings>().IsSimulated
+                ? sp.GetRequiredService<SimulatedBillingGateway>()
+                : sp.GetRequiredService<StripeBillingGateway>());
+
+        services.AddScoped<IBillingEventReader>(sp =>
+            sp.GetRequiredService<BillingSettings>().IsSimulated
+                ? sp.GetRequiredService<SimulatedBillingEventReader>()
+                : sp.GetRequiredService<StripeEventReader>());
+
+        // The one place tenant isolation is stepped around for billing. See the interface for
+        // why the webhook cannot run under the query filter and why this is safe.
+        services.AddScoped<IBillingSubscriptionStore, BillingSubscriptionStore>();
+
+        // What a plan grants, and the meter that enforces the part of it that is countable.
+        // Scoped: both read per-request state and the counter writes.
+        services.AddScoped<ITenantEntitlements, TenantEntitlements>();
+        services.AddScoped<IScanQuotaCounter, ScanQuotaCounterStore>();
 
         // ---- Auth: login/register --------------------------------------------------------
         services.AddScoped<IUserRepository, UserRepository>();

@@ -15,5 +15,16 @@ public enum DebateOutcome
     TurnCapped,
 
     /// <summary>Blue produced no parseable verdict. Not evidence of anything.</summary>
-    VerdictUnreadable
+    VerdictUnreadable,
+
+    /// <summary>
+    /// No debate was run at all — the tenant's plan does not include adjudication.
+    /// </summary>
+    /// <remarks>
+    /// The absence of a verdict, and emphatically not a verdict. Every other member here reports
+    /// something that happened during a debate; this one says nobody looked. Rendering it as a
+    /// failure would state a result no agent produced, which is the same mistake the five-value
+    /// <c>HopVerdict</c> exists to prevent one level down.
+    /// </remarks>
+    NotAdjudicated
 }

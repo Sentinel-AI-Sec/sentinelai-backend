@@ -35,6 +35,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SentinelAI.Application\SentinelAI.Application.csproj" />
+    <!-- SEC-39: the benchmark runner's SARIF reader is covered here rather than in a fifth test
+         project. Its failure mode is a silently empty result set — a tool that "found nothing"
+         because its paths were absolute — which is exactly the kind that needs a test. -->
+    <ProjectReference Include="..\..\tools\SentinelAI.Benchmark\SentinelAI.Benchmark.csproj" />
   </ItemGroup>
 
 </Project>

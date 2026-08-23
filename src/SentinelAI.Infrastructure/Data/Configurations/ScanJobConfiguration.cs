@@ -16,6 +16,11 @@ public class ScanJobConfiguration : IEntityTypeConfiguration<ScanJob>
         builder.Property(s => s.Stage)
             .HasConversion<string>();
 
+        // What makes GET /v1/scans a keyset seek rather than a sort of every scan the tenant has
+        // ever run: the columns the list's WHERE and ORDER BY read, in that order.
+        // ApplyTenantIsolation already adds a bare TenantId index; this is the ordered composite.
+        builder.HasIndex(s => new { s.TenantId, s.StartedAt, s.Id });
+
         builder.HasOne(s => s.ScanBundle)
             .WithOne(b => b.ScanJob)
             .HasForeignKey<ScanBundle>(b => b.ScanJobId);

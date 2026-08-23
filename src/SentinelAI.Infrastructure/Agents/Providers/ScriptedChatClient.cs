@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using SentinelAI.Domain.Models;
+using SentinelAI.Infrastructure.Agents.Executors;
 
 namespace SentinelAI.Infrastructure.Agents.Providers;
 
@@ -45,26 +46,55 @@ public sealed class ScriptedChatClient : IChatClient
         => _responder = (_, _) => CannedTurnFor(role);
 
     /// <summary>The canned response for a role. Deterministic — no randomness, no clock.</summary>
+    /// <remarks>
+    /// Written in the labelled line shape each role's <c>Instructions</c> now mandate, and
+    /// against the node labels of <see cref="ScanBrief.Stub"/> — the brief every offline run is
+    /// handed. That is what makes an offline run demonstrate the real thing: the hops resolve to
+    /// real node keys, Blue's verdicts attach to them, and the mechanical edge check passes,
+    /// so the transcript renders exactly as a live one does. The previous canned turns named
+    /// resources (<c>s3:crown-jewels</c>) that appear in no graph, so every reader of the
+    /// transcript — the edge validator included — correctly found nothing in them.
+    /// </remarks>
     public static string CannedTurnFor(AgentRole role) => role switch
     {
         AgentRole.Red =>
-            "ASSERT: pkg:Newtonsoft.Json (CWE-502) -> code:OrderController.Deserialize "
-            + "-> infra:ecs_task.api -> iam_role:api-task-role -> s3:crown-jewels. "
-            + "4 hops, seeded from the highest-severity finding.",
+            """
+            HOP 1: N1 -> used-by -> N2 | none | F1: packages.lock.json pins commons-collections 3.2.1 and AppDataHandler imports InvokerTransformer
+            HOP 2: N2 -> deployed-as -> N4 | none | the api-service task definition references acme/api by tag
+            HOP 3: N4 -> assumes -> N6 | none | the api-service task definition sets taskRoleArn to api-task-role
+            HOP 4: N6 -> can-access -> N8 | none | F4: the inline policy grants s3:GetObject on customer-data-bucket/*
+            CHAIN: N1 -> N2 -> N4 -> N6 -> N8
+            IMPACT: unauthenticated deserialization ends in read/write access to customer PII.
+            """,
 
         AgentRole.Blue =>
-            "VALIDATE: hop 1 confirmed against packages.lock.json. hop 2 confirmed against "
-            + "the Roslyn finding. hop 3 image-name join is INFERRED. hop 4 confirmed "
-            + "against the IAM policy. " + "No link broken.",
+            $"""
+            HOP 1: N1 -> N2 | CONFIRMED | the lock file and the import in F1 both name the gadget class
+            HOP 2: N2 -> N4 | UNRESOLVED | U1: the image is joined by mutable tag, not by digest — no digest was recorded
+            HOP 3: N4 -> N6 | CONFIRMED | the task definition's taskRoleArn names api-task-role outright
+            HOP 4: N6 -> N8 | CONFIRMED | F4 grants s3:Get/PutObject on customer-data-bucket/*
+            {BlueTeamExecutor.HoldsVerdict}
+            """,
 
         AgentRole.Reporter =>
-            "ADJUDICATE: chain survives Blue's rebuttal. Severity HIGH. "
-            + "Weakest join is INFERRED at the code->infra seam.",
+            """
+            CHAIN: N1 -> N2 -> N4 -> N6 -> N8
+            SEVERITY: high — a CVSS 9.8 deserialization gadget chain ends at the crown jewel
+            CONFIDENCE: inferred — the weakest join is N2 -> N4
+            IMPACT: an attacker reaching the deserialization sink can read and write customer PII in customer-data-bucket.
+            EVIDENCE: F1 for the gadget chain, F4 for the bucket grant, U1 for the unproven image join
+            NEXT: record the deployed image digest and compare it against the api-service task definition.
+            """,
 
         // The Orchestrator does not debate. It has a canned turn only so that every role
         // is representable offline, and so a future orchestrator model call has a script.
         AgentRole.Orchestrator =>
-            "SEQUENCE: debate seeded. Red asserts first; turn-cap enforced by the graph.",
+            """
+            TARGET: N8, the customer-data-bucket holding customer PII.
+            LEAD: F1 — commons-collections 3.2.1 (CVE-2015-6420, CVSS 9.8) reaches two deserialization sinks.
+            ROUTE: dependency to application code to the running task to its IAM role to the bucket.
+            WEAK JOIN: N2 -> N4, joined by image tag rather than digest — a recorded digest would settle it.
+            """,
 
         _ => throw new ArgumentOutOfRangeException(nameof(role), role, "No canned turn for this role.")
     };

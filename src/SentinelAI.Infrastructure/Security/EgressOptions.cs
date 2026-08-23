@@ -29,6 +29,24 @@ public sealed class EgressOptions
     /// default because there is no vendor: the corpus is wherever the deployment put it.
     /// </summary>
     public IList<string> RagHosts { get; } = [];
+
+    /// <summary>
+    /// Observability hosts — an OTLP collector receiving debate traces (SEC-36).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Needed only when <c>Observability:Tracing:CaptureContent</c> is on. A metadata-only trace
+    /// carries no job content and its endpoint is not reported to the egress check at all, so a
+    /// deployment that turns tracing on for tokens and latency needs nothing here.
+    /// </para>
+    /// <para>
+    /// No compiled-in default, for the same reason <see cref="RagHosts"/> has none: there is no
+    /// vendor. Langfuse Cloud is <c>cloud.langfuse.com</c> or <c>us.cloud.langfuse.com</c>; a
+    /// self-hosted instance is wherever it was put. Whichever it is, exporting prompts means
+    /// writing the host down where an auditor can read it — which is the point.
+    /// </para>
+    /// </remarks>
+    public IList<string> TelemetryHosts { get; } = [];
 }
 
 /// <summary>Builds the effective <see cref="IEgressPolicy"/> for a deployment.</summary>
@@ -65,6 +83,11 @@ public static class EgressPolicyLoader
             .Where(h => !string.IsNullOrWhiteSpace(h))
             .Select(h => new EgressDestination(h.Trim(), EgressPurpose.Rag,
                 $"operator-added via {EgressOptions.SectionName}:RagHosts")));
+
+        allowed.AddRange(options.TelemetryHosts
+            .Where(h => !string.IsNullOrWhiteSpace(h))
+            .Select(h => new EgressDestination(h.Trim(), EgressPurpose.Telemetry,
+                $"operator-added via {EgressOptions.SectionName}:TelemetryHosts")));
 
         return new EgressPolicy(allowed);
     }

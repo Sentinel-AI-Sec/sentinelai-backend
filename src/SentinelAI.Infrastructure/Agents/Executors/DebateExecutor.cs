@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using SentinelAI.Domain.Models;
+using SentinelAI.Infrastructure.Observability;
 
 namespace SentinelAI.Infrastructure.Agents.Executors;
 
@@ -25,8 +26,12 @@ namespace SentinelAI.Infrastructure.Agents.Executors;
 /// up, because the executor must not know how a tier resolves to a vendor or a model id — it
 /// only records which class of model answered.
 /// </param>
+/// <param name="tracing">
+/// Whether this turn's span may carry the prompt and the answer (SEC-36). Null is metadata
+/// only, which is the default everywhere; content capture is opted into once, at composition.
+/// </param>
 public abstract class DebateExecutor<TOutput>(
-    string id, AIAgent agent, AgentRole role, ModelTier tier = ModelTier.High)
+    string id, AIAgent agent, AgentRole role, ModelTier tier = ModelTier.High, TurnTracing? tracing = null)
     : Executor<DebateTurn, TOutput>(id)
 {
     private readonly AIAgent _agent = agent ?? throw new ArgumentNullException(nameof(agent));
@@ -36,6 +41,9 @@ public abstract class DebateExecutor<TOutput>(
 
     /// <summary>Which model tier serves this executor's turns.</summary>
     protected ModelTier Tier { get; } = tier;
+
+    /// <summary>What this executor's turn spans are allowed to record (SEC-36).</summary>
+    protected TurnTracing? Tracing { get; } = tracing;
 
     /// <summary>Builds the prompt handed to the model from the incoming turn and transcript.</summary>
     protected abstract string BuildPrompt(DebateTurn incoming, DebateState state);
@@ -50,10 +58,32 @@ public abstract class DebateExecutor<TOutput>(
         DebateTurn message, IWorkflowContext context, CancellationToken cancellationToken)
     {
         var state = await ReadStateAsync(context, cancellationToken).ConfigureAwait(false);
+        var prompt = BuildPrompt(message, state);
 
-        var response = await _agent
-            .RunAsync(BuildPrompt(message, state), cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
+        // SEC-36. The span opens before the model call and closes after the turn is interpreted,
+        // so its duration is the whole turn rather than only the request — which is the number a
+        // reader wants, and the one a separate stopwatch could disagree with.
+        //
+        // Its round comes from the produced turn rather than from `message`: Red opens a new
+        // round, Blue and the Reporter answer within the one they were handed, and only the turn
+        // itself knows which. Costs a null check when nothing is listening.
+        using var span = DebateTracing.StartTurn(Role, Tier, prompt, Tracing);
+
+        AgentResponse response;
+
+        try
+        {
+            response = await _agent
+                .RunAsync(prompt, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            DebateTracing.RecordFailure(span, ex);
+            throw;
+        }
+
+        DebateTracing.RecordResponse(span, response, Tracing);
 
         // Stamped here rather than in each Interpret override, so a new agent cannot be added
         // that quietly spends tokens nobody counts. SEC-31's cost figure is a fold over the
@@ -63,6 +93,8 @@ public abstract class DebateExecutor<TOutput>(
             Tier = Tier,
             Usage = UsageOf(response)
         };
+
+        DebateTracing.RecordTurn(span, turn);
 
         await WriteStateAsync(context, state.Append(turn), turn, cancellationToken).ConfigureAwait(false);
         return turn;
@@ -138,8 +170,8 @@ public abstract class DebateExecutor<TOutput>(
 /// A debate agent that hands its turn to the next agent along the graph — Red and Blue.
 /// </summary>
 public abstract class DebateExecutor(
-    string id, AIAgent agent, AgentRole role, ModelTier tier = ModelTier.High)
-    : DebateExecutor<DebateTurn>(id, agent, role, tier)
+    string id, AIAgent agent, AgentRole role, ModelTier tier = ModelTier.High, TurnTracing? tracing = null)
+    : DebateExecutor<DebateTurn>(id, agent, role, tier, tracing)
 {
     public override ValueTask<DebateTurn> HandleAsync(
         DebateTurn message,

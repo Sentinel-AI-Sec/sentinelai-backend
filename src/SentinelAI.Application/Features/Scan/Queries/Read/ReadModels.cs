@@ -57,6 +57,20 @@ internal static class Wire
     public static string Of(ChainStatus status) => status.ToString().ToLowerInvariant();
 
     /// <summary>
+    /// Job status and pipeline stage, for the list endpoints.
+    /// </summary>
+    /// <remarks>
+    /// The older <c>GET /v1/scans/{id}</c> answers inside the <c>Response</c> envelope and lets
+    /// the serializer render these two as integers. The list endpoints do not copy that: a
+    /// <c>"status": 2</c> in a table row is meaningless to read and changes meaning the day a
+    /// member is inserted into the enum. Both spellings coexist because the poll endpoint's shape
+    /// is already depended on and this is a new one — see <c>docs/Read_API.md</c>.
+    /// </remarks>
+    public static string Of(ScanStatus status) => status.ToString().ToLowerInvariant();
+
+    public static string Of(ScanStage stage) => stage.ToString().ToLowerInvariant();
+
+    /// <summary>
     /// Per-hop verdicts cross the wire as words for the usual reason, and for one more: the two
     /// members that are not verdicts have to be nameable. <c>"blue_verdict": "unattributed"</c>
     /// is something a screen can decline to render; <c>false</c> was not (audit 42-A).
@@ -226,10 +240,47 @@ public sealed record ChainView
         HopCount = chain.HopCount,
         Status = Wire.Of(chain.Status),
         MinConfidence = Wire.Of(chain.MinConfidence),
-        Hops = [.. chain.ChainHops
-            .OrderBy(h => h.HopOrder)
-            .Select(h => ChainHopView.From(h, nodeKeysById))],
+        Hops = HopsOf(chain, nodeKeysById),
     };
+
+    /// <summary>
+    /// The chain's hops in order, each carrying the node it stands on — including the seed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The seed hop has no edge, and its node key is not recoverable from the row alone.</b>
+    /// A hop names its node through <c>edge.to_node_id</c>, which works for every hop the
+    /// traversal stepped into and not for hop 0, which arrived from nowhere — <c>edge_id</c> is
+    /// null there by design. Read hop-by-hop, the seed's key therefore came back null and the
+    /// chain served on the wire began one hop late.
+    /// </para>
+    /// <para>
+    /// That is not cosmetic. The seed is the finding the chain <em>starts</em> from — the
+    /// vulnerable package in the flagship chain — so every path the dashboard drew was missing
+    /// the dependency layer, and a three-layer claim was rendered as two. Nothing failed:
+    /// the graph stage's own response carries the full path, so the two halves disagreed while
+    /// each was individually green. SEC-49's harness is what put them side by side.
+    /// </para>
+    /// <para>
+    /// The fix needs the sibling hop rather than more columns: hop 0's node is where hop 1's
+    /// edge comes <em>from</em>. That is exact, not inferred — the traversal built the two
+    /// together — and it stays correct if hops are ever renumbered, because it reads the next
+    /// hop in order rather than assuming the number 1.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<ChainHopView> HopsOf(Chain chain, IReadOnlyDictionary<Guid, string> nodeKeysById)
+    {
+        var ordered = chain.ChainHops.OrderBy(h => h.HopOrder).ToList();
+
+        return
+        [
+            .. ordered.Select((hop, index) => ChainHopView.From(
+                hop,
+                nodeKeysById,
+                // Only ever consulted when this hop has no edge of its own.
+                nextHop: index + 1 < ordered.Count ? ordered[index + 1] : null)),
+        ];
+    }
 }
 
 public sealed record ChainHopView
@@ -281,9 +332,18 @@ public sealed record ChainHopView
     /// <summary>Null where the hop is a place on a path that carries no scanner finding.</summary>
     [JsonPropertyName("finding_id")] public string? FindingId { get; init; }
 
+    /// <summary>
+    /// The node this hop stands on. Null only when the graph rows it would be read from are
+    /// missing, which is a broken chain rather than a normal one.
+    /// </summary>
     [JsonPropertyName("node_key")] public string? NodeKey { get; init; }
 
-    public static ChainHopView From(ChainHop hop, IReadOnlyDictionary<Guid, string> nodeKeysById) => new()
+    /// <param name="nextHop">
+    /// The hop after this one, when there is one. Consulted only for the seed hop, whose own
+    /// row cannot name its node — see <see cref="ChainView.HopsOf"/>.
+    /// </param>
+    public static ChainHopView From(
+        ChainHop hop, IReadOnlyDictionary<Guid, string> nodeKeysById, ChainHop? nextHop = null) => new()
     {
         Order = hop.HopOrder,
         TechniqueId = hop.TechniqueId,
@@ -291,8 +351,23 @@ public sealed record ChainHopView
         BlueVerdict = Wire.Of(hop.BlueVerdict),
         EdgeConfidence = hop.Edge is { } edge ? Wire.Of(edge.Confidence) : null,
         FindingId = hop.FindingId?.ToString(),
-        NodeKey = hop.Edge is { } e && nodeKeysById.TryGetValue(e.ToNodeId, out var key) ? key : null,
+        NodeKey = NodeKeyOf(hop, nextHop, nodeKeysById),
     };
+
+    /// <summary>
+    /// A hop's node: where its own edge arrives, or — for the seed — where the next hop's edge
+    /// departs from.
+    /// </summary>
+    private static string? NodeKeyOf(
+        ChainHop hop, ChainHop? nextHop, IReadOnlyDictionary<Guid, string> nodeKeysById)
+    {
+        if (hop.Edge is { } edge)
+            return nodeKeysById.TryGetValue(edge.ToNodeId, out var key) ? key : null;
+
+        return nextHop?.Edge is { } outgoing && nodeKeysById.TryGetValue(outgoing.FromNodeId, out var seed)
+            ? seed
+            : null;
+    }
 }
 
 // ---- GET /v1/reports/{id} --------------------------------------------------------------
@@ -354,4 +429,75 @@ public sealed record ReportCostView
         ModelCalls = report.ModelCalls,
         Rated = report.CostRated,
     };
+}
+
+// ---- GET /v1/scans/{id}/audit-integrity (admin) -----------------------------------------
+
+/// <summary>
+/// The machine-checkable facts about one scan's reasoning.
+/// </summary>
+/// <remarks>
+/// Deliberately absent from the UI's <c>wire.ts</c>. This is an operator surface: it answers "did
+/// that run behave", and every field is either self-reported by the pipeline or checked against the
+/// graph the same scan built. None of it is a security judgement, and read as one it would mislead.
+/// </remarks>
+public sealed record AuditIntegrityView
+{
+    [JsonPropertyName("scan_job_id")] public required string ScanJobId { get; init; }
+    [JsonPropertyName("adjudicated")] public required bool Adjudicated { get; init; }
+    [JsonPropertyName("outcome")] public required string Outcome { get; init; }
+    [JsonPropertyName("rounds")] public required int Rounds { get; init; }
+    [JsonPropertyName("verdict_readable")] public required bool VerdictReadable { get; init; }
+    [JsonPropertyName("terminated_by_turn_cap")] public required bool TerminatedByTurnCap { get; init; }
+    [JsonPropertyName("weakest_join")] public required string WeakestJoin { get; init; }
+
+    [JsonPropertyName("edge_integrity_warnings")] public required int EdgeIntegrityWarnings { get; init; }
+    [JsonPropertyName("edge_integrity_detail")] public required IReadOnlyList<string> EdgeIntegrityDetail { get; init; }
+    [JsonPropertyName("abandoned_reasoning_warnings")] public required int AbandonedReasoningWarnings { get; init; }
+    [JsonPropertyName("abandoned_reasoning_detail")] public required IReadOnlyList<string> AbandonedReasoningDetail { get; init; }
+
+    [JsonPropertyName("retrieval_findings")] public required int RetrievalFindings { get; init; }
+    [JsonPropertyName("retrieval_grounded")] public required int RetrievalGrounded { get; init; }
+    [JsonPropertyName("coverage_percent")] public required int CoveragePercent { get; init; }
+    [JsonPropertyName("modes_that_did_not_fire")] public required IReadOnlyList<string> ModesThatDidNotFire { get; init; }
+
+    [JsonPropertyName("candidate_chains")] public required int CandidateChains { get; init; }
+    [JsonPropertyName("chains_adjudicated")] public required int ChainsAdjudicated { get; init; }
+
+    [JsonPropertyName("corpus_version")] public required string CorpusVersion { get; init; }
+    [JsonPropertyName("harness_version")] public required int HarnessVersion { get; init; }
+    [JsonPropertyName("created_at")] public required DateTime CreatedAt { get; init; }
+
+    public static AuditIntegrityView From(ScanAuditIntegrity row) => new()
+    {
+        ScanJobId = row.ScanJobId.ToString(),
+        Adjudicated = row.Adjudicated,
+        Outcome = row.Outcome.ToLowerInvariant(),
+        Rounds = row.Rounds,
+        VerdictReadable = row.VerdictReadable,
+        TerminatedByTurnCap = row.TerminatedByTurnCap,
+        WeakestJoin = row.WeakestJoin.ToLowerInvariant(),
+        EdgeIntegrityWarnings = row.EdgeIntegrityWarnings,
+        EdgeIntegrityDetail = Lines(row.EdgeIntegrityDetail),
+        AbandonedReasoningWarnings = row.AbandonedReasoningWarnings,
+        AbandonedReasoningDetail = Lines(row.AbandonedReasoningDetail),
+        RetrievalFindings = row.RetrievalFindings,
+        RetrievalGrounded = row.RetrievalGrounded,
+        CoveragePercent = row.CoveragePercent,
+        ModesThatDidNotFire = row.ModesThatDidNotFire is { Length: > 0 }
+            ? row.ModesThatDidNotFire.Split(',')
+            : [],
+        CandidateChains = row.CandidateChains,
+        ChainsAdjudicated = row.ChainsAdjudicated,
+        CorpusVersion = row.CorpusVersion,
+        HarnessVersion = row.HarnessVersion,
+        CreatedAt = row.CreatedAt,
+    };
+
+    /// <summary>
+    /// Warnings back out as a list. Stored as one blob, read as items — a reader wants to count
+    /// them and a newline-delimited string makes that the caller's problem.
+    /// </summary>
+    private static IReadOnlyList<string> Lines(string stored) =>
+        string.IsNullOrEmpty(stored) ? [] : stored.Split('\n');
 }

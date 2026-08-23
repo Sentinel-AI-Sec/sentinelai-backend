@@ -37,3 +37,12 @@ public sealed record GetChainsQuery(
 
 /// <summary>One draft audit, with its chains and citations.</summary>
 public sealed record GetReportQuery(Guid ReportId) : IRequest<Response>;
+
+/// <summary>
+/// What could be checked about one scan's own reasoning. Admin only, and not a customer surface.
+/// </summary>
+/// <remarks>
+/// See <c>ScanAuditIntegrity</c> for why this is recorded and why it is not shown to the tenant
+/// whose scan it describes.
+/// </remarks>
+public sealed record GetAuditIntegrityQuery(Guid ScanJobId) : IRequest<Response>;

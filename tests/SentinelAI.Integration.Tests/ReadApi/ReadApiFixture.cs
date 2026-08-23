@@ -15,6 +15,16 @@ internal sealed class ReadApiFixture(ScanApiFactory factory)
 {
     public Guid TenantId { get; } = Guid.NewGuid();
     public Guid ScanJobId { get; private set; }
+
+    /// <summary>
+    /// The project the seeded scan belongs to.
+    /// </summary>
+    /// <remarks>
+    /// Exposed because a test cannot read it back out of the seeding context: <c>SeedAsync</c>
+    /// writes past the tenant query filter, but that filter still shapes reads and the seeding
+    /// scope resolves no tenant.
+    /// </remarks>
+    public Guid ProjectId { get; private set; }
     public Guid ReportId { get; private set; }
 
     /// <summary>Node keys seeded into the graph, in the order they were written.</summary>
@@ -133,6 +143,8 @@ internal sealed class ReadApiFixture(ScanApiFactory factory)
         });
 
         ScanJobId = jobId;
+
+        ProjectId = projectId;
         ReportId = reportId;
     }
 

@@ -7,6 +7,7 @@ using SentinelAI.Application.Features.Scan.ThinSlice;
 using SentinelAI.Domain.Abstractions;
 using SentinelAI.Domain.Enums;
 using SentinelAI.Domain.Models;
+using SentinelAI.Application.Features.Scan.Audit;
 
 namespace SentinelAI.Application.Features.Scan.Orchestration;
 
@@ -51,6 +52,7 @@ public sealed class ScanPipelineRunner(
     GraphStagePipeline graphStage,
     ThinSlicePipeline thinSlice,
     ChainOutcomeWriter chainOutcomeWriter,
+    AuditIntegrityWriter integrityWriter,
     ILogger<ScanPipelineRunner> logger)
 {
     /// <summary>
@@ -248,6 +250,11 @@ public sealed class ScanPipelineRunner(
         // is passed too (audit 42-A) — it is the only key from the transcript's N-labels back to
         // the node keys the hop rows are joined on.
         await chainOutcomeWriter.ApplyAsync(job.Id, result.Audit, result.Brief, ct);
+
+        // After the chain outcome, because the chain counts are part of what it records. Its own
+        // failures never reach here -- see the writer -- so this cannot turn a completed scan into
+        // a failed one.
+        await integrityWriter.WriteAsync(job.TenantId, job.Id, result.Audit, result.Evaluation, ct);
 
         logger.LogInformation(
             "Stage {Stage} completed for scan job {ScanJobId}: debate {Outcome} in {Rounds} "
