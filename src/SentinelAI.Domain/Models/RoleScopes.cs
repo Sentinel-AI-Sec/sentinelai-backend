@@ -35,6 +35,26 @@ public static class RoleScopes
         [AuthScopes.ScanRead, AuthScopes.ReportRead];
 
     /// <summary>
+    /// What a machine token is issued with — the GitHub Action's, minted by
+    /// <c>POST /v1/auth/machine-token</c>.
+    /// </summary>
+    /// <remarks>
+    /// The same three scopes as <see cref="Operator"/>, and a separate member rather than a
+    /// reference to it because the two are the same set for different reasons and either could
+    /// move without the other. This one is fixed by what the Action does: <c>POST /v1/scans</c>
+    /// needs <c>scan:write</c>, the poll step's <c>GET /v1/scans/{id}</c> needs
+    /// <c>scan:read</c>, and the PR comment's <c>GET /v1/reports/{id}</c> needs
+    /// <c>report:read</c>. Minting <c>scan:write</c> alone yields a run that uploads and then
+    /// 403s.
+    /// <para>
+    /// A machine token carries these and <b>no role claim</b>, which is what keeps it strictly
+    /// weaker than the admin token used to mint it — every destructive endpoint is role-gated.
+    /// </para>
+    /// </remarks>
+    public static readonly IReadOnlyList<string> Machine =
+        [AuthScopes.ScanWrite, AuthScopes.ScanRead, AuthScopes.ReportRead];
+
+    /// <summary>
     /// The scopes for a role. An unrecognized role gets none — a token that does not say what
     /// its holder is should not be granted anything on the strength of the string being novel.
     /// </summary>

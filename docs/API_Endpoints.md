@@ -23,11 +23,21 @@ RFC 7807 `problem+json` on failure — see [`Read_API.md`](Read_API.md) §2 for 
 | POST | `/v1/auth/login` | none | envelope |
 | POST | `/v1/auth/refresh` | refresh token in body | envelope |
 | POST | `/v1/auth/logout` | refresh token in body | envelope |
+| POST | `/v1/auth/machine-token` | bearer, **admin** | envelope |
 
-No `[Authorize]` anywhere on this controller, deliberately: these are the endpoints that hand out
+No `[Authorize]` at the controller level, deliberately: these are the endpoints that hand out
 tokens, so requiring one would be circular. `logout` is gated by possessing a valid refresh token
 rather than a current access token — the whole point is that it works after the access token has
 expired. `refresh` rotates: the presented token is revoked and replaced, so it cannot be reused.
+
+`machine-token` is the exception and carries its own `[Authorize(Roles = "admin")]`. It is not
+circular — it trades a session you already hold for a longer-lived, strictly weaker credential for
+the same tenant: the GitHub Action's `SENTINELAI_MACHINE_TOKEN`. No request body and no tenant
+parameter; the tenant comes off the caller's verified token. What comes back carries `scan:write`,
+`scan:read` and `report:read` (the three the Action reaches), **no `role` claim**, and a one-year
+expiry (`Authentication:Jwt:MachineTokenDays`) — so it can upload a scan and read the result and
+is refused by every role-gated endpoint, this one included. Nothing persists it: it is readable
+once, there is no per-token revocation, and losing it means issuing another.
 
 ### Account — `AccountController`
 
