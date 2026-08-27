@@ -44,6 +44,24 @@ public class AddMemberEndpointTests : IClassFixture<ScanApiFactory>
             CreatedAt = DateTime.UtcNow,
         }));
 
+    /// <summary>
+    /// Seeds the admin who does the adding, and returns a token for them.
+    /// </summary>
+    /// <remarks>
+    /// Not ceremony: <c>User.TenantId</c> is a real foreign key, so the tenant a member is moved
+    /// *into* has to exist as a row before the move can be written. A token names a tenant, it
+    /// does not create one — <see cref="ScanApiFactory.SeedAsync"/> fills in tenant rows only for
+    /// tenants a seed actually referenced. Every test here that expects the move to succeed
+    /// therefore has to put someone in the destination first, which is also what production looks
+    /// like: the admin calling this is themselves a row in the tenant they are adding to.
+    /// </remarks>
+    private async Task<string> SeedActingAdminAsync(Guid tenantId)
+    {
+        var actorId = Guid.NewGuid();
+        await SeedUserAsync(tenantId, actorId, Roles.Admin, NewEmail());
+        return TestJwt.Create(tenantId, userId: actorId, role: Roles.Admin);
+    }
+
     private async Task<User?> UserAsync(Guid userId)
     {
         User? user = null;
@@ -147,7 +165,7 @@ public class AddMemberEndpointTests : IClassFixture<ScanApiFactory>
         await SeedUserAsync(theirTenant, target, Roles.Admin, email);
 
         var mine = Guid.NewGuid();
-        var token = TestJwt.Create(mine, userId: Guid.NewGuid(), role: Roles.Admin);
+        var token = await SeedActingAdminAsync(mine);
 
         var response = await AddAsync(ClientFor(token), email.ToUpperInvariant(), Roles.Viewer);
 
@@ -241,7 +259,7 @@ public class AddMemberEndpointTests : IClassFixture<ScanApiFactory>
         await SeedUserAsync(theirTenant, target, Roles.Viewer, email);
 
         var mine = Guid.NewGuid();
-        var token = TestJwt.Create(mine, userId: Guid.NewGuid(), role: Roles.Admin);
+        var token = await SeedActingAdminAsync(mine);
 
         var response = await AddAsync(ClientFor(token), email, Roles.Analyst);
 
@@ -267,7 +285,7 @@ public class AddMemberEndpointTests : IClassFixture<ScanApiFactory>
         await SeedUserAsync(theirTenant, Guid.NewGuid(), Roles.Admin, NewEmail());
 
         var mine = Guid.NewGuid();
-        var token = TestJwt.Create(mine, userId: Guid.NewGuid(), role: Roles.Admin);
+        var token = await SeedActingAdminAsync(mine);
 
         var response = await AddAsync(ClientFor(token), email, Roles.Viewer);
 
@@ -295,7 +313,7 @@ public class AddMemberEndpointTests : IClassFixture<ScanApiFactory>
         }));
 
         var mine = Guid.NewGuid();
-        var token = TestJwt.Create(mine, userId: Guid.NewGuid(), role: Roles.Admin);
+        var token = await SeedActingAdminAsync(mine);
 
         var response = await AddAsync(ClientFor(token), email, Roles.Analyst);
 
@@ -330,7 +348,7 @@ public class AddMemberEndpointTests : IClassFixture<ScanApiFactory>
         await SeedUserAsync(theirTenant, target, Roles.Admin, email);
 
         var mine = Guid.NewGuid();
-        var token = TestJwt.Create(mine, userId: Guid.NewGuid(), role: Roles.Admin);
+        var token = await SeedActingAdminAsync(mine);
 
         var response = await AddAsync(ClientFor(token), email, role);
 
@@ -360,7 +378,7 @@ public class AddMemberEndpointTests : IClassFixture<ScanApiFactory>
             CreatedAt = DateTime.UtcNow,
         }));
 
-        var token = TestJwt.Create(Guid.NewGuid(), userId: Guid.NewGuid(), role: Roles.Admin);
+        var token = await SeedActingAdminAsync(Guid.NewGuid());
 
         var response = await AddAsync(ClientFor(token), email, Roles.Viewer);
 
@@ -384,7 +402,7 @@ public class AddMemberEndpointTests : IClassFixture<ScanApiFactory>
         await SeedUserAsync(theirTenant, Guid.NewGuid(), Roles.Admin, email);
 
         var mine = Guid.NewGuid();
-        var token = TestJwt.Create(mine, userId: Guid.NewGuid(), role: Roles.Admin);
+        var token = await SeedActingAdminAsync(mine);
         var client = ClientFor(token);
 
         await AddAsync(client, email, Roles.Analyst);
