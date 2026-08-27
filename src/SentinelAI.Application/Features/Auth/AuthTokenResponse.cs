@@ -8,6 +8,19 @@ public sealed record AuthTokenResponse
     public required string RefreshToken { get; init; }
     public required DateTime RefreshTokenExpiresAt { get; init; }
     public required Guid TenantId { get; init; }
+
+    /// <summary>
+    /// Who this token was issued to — the <c>sub</c> claim inside <see cref="AccessToken"/>,
+    /// echoed for the same reason <see cref="TenantId"/> is: so a client can identify itself
+    /// without decoding a JWT in the browser.
+    /// </summary>
+    /// <remarks>
+    /// Not merely a convenience. The console needs it to tell its own row apart from everyone
+    /// else's in the members table, because an admin may not change their own role — without
+    /// this the screen would have to offer that action to find out it is refused.
+    /// </remarks>
+    public required Guid UserId { get; init; }
+
     public required string Role { get; init; }
 
     /// <summary>

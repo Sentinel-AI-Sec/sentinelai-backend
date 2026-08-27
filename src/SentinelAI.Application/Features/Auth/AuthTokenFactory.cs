@@ -37,6 +37,7 @@ public sealed class AuthTokenFactory(IUnitOfWork unitOfWork, IJwtTokenIssuer tok
             RefreshToken = rawRefreshToken,
             RefreshTokenExpiresAt = refreshToken.ExpiresAt,
             TenantId = user.TenantId,
+            UserId = user.Id,
             Role = user.Role,
             Scopes = RoleScopes.For(user.Role),
         };

@@ -143,6 +143,23 @@ public class ScanApiFactory : WebApplicationFactory<Program>
                 // See BundleRoot: the shipped default is an absolute Linux path no test
                 // process can create.
                 ["BundleStorage:RootPath"] = BundleRoot,
+
+                // Third instance of the same class of bug as the two above, and the one that
+                // bites hardest. The test host runs in Development, so it reads the developer's
+                // user secrets — and a developer who has configured real Stripe test keys there
+                // ends up with `Billing:Provider = Simulated` (from the committed
+                // appsettings.json) sitting beside `Billing:SecretKey = sk_test_...`. That pair
+                // is the contradiction BillingSettingsLoader.ResolveProvider refuses to guess at,
+                // so it throws at the first resolve and every billing-touching request answers
+                // 500 — on that machine only, which is what makes it look like flaky product
+                // code rather than configuration.
+                //
+                // Cleared rather than set to Stripe: a test suite must never hold credentials
+                // that could reach a real Stripe account, test-mode or not. BillingApiFactory
+                // layers its own Stripe configuration and a fake gateway on top when a test
+                // actually needs one.
+                ["Billing:SecretKey"] = "",
+                ["Billing:WebhookSecret"] = "",
             });
         });
 
